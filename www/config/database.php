@@ -2,8 +2,8 @@
 // Database configuration for XAMPP/UniformServer (MySQL only)
 $host = 'localhost';
 $dbname = 'habbo_agency';
-$username = 'root';
-$password = '';
+$username = 'habbo_agency';
+$password = '@m4GHmlzG9I[We9W';
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [

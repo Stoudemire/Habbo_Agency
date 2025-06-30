@@ -27,157 +27,7 @@ if (!in_array($user_role, ['administrador', 'super_admin'])) {
 }
 
 // Handle payment status updates
-// Debug main query endpoint
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'debug_main') {
-    header('Content-Type: application/json');
-    
-    try {
-        // Test the exact main query being used
-        $stmt = $pdo->query("
-            SELECT 
-                u.id, 
-                u.username, 
-                u.email,
-                u.role,
-                COALESCE(ur.display_name, u.role) as rank_name,
-                ur.rank_image,
-                COALESCE(ph.status, 'PENDIENTE') as payment_status,
-                ph.status as raw_status
-            FROM users u
-            LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-            LEFT JOIN payment_history ph ON u.id = ph.user_id
-            WHERE ph.status IS NULL OR ph.status != 'PAGADO'
-            ORDER BY u.username ASC
-        ");
-        $main_users = $stmt->fetchAll();
-        
-        echo json_encode([
-            'success' => true,
-            'main_users' => $main_users,
-            'count' => count($main_users),
-            'debug_time' => date('Y-m-d H:i:s')
-        ]);
-        exit;
-        
-    } catch (Exception $e) {
-        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
-        exit;
-    }
-}
 
-// Test query endpoint 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'test_query') {
-    header('Content-Type: application/json');
-    
-    try {
-        // Test the corrected query used for history (handles orphaned records)
-        $test_query = "
-            SELECT 
-                COALESCE(u.id, ph.user_id) as id,
-                COALESCE(u.username, CONCAT('Usuario_', ph.user_id)) as username,
-                COALESCE(u.email, '') as email,
-                COALESCE(u.role, 'usuario') as role,
-                COALESCE(ur.display_name, u.role, 'Usuario') as rank_name,
-                COALESCE(ur.rank_image, '') as rank_image,
-                ph.status as payment_status,
-                ph.updated_at as payment_updated
-            FROM payment_history ph
-            LEFT JOIN users u ON ph.user_id = u.id
-            LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-            WHERE ph.status = 'PAGADO'
-            ORDER BY ph.updated_at DESC
-        ";
-        
-        $result = $pdo->query($test_query)->fetchAll();
-        
-        // Also test raw payment_history data
-        $raw_history = $pdo->query("SELECT * FROM payment_history WHERE status IN ('PAGADO', 'CANCELADO') ORDER BY updated_at DESC")->fetchAll();
-        
-        // Test user_ranks table
-        $ranks_query = $pdo->query("SELECT * FROM user_ranks")->fetchAll();
-        
-        // Check if user_id 4 exists in users table
-        $user_check = $pdo->query("SELECT * FROM users WHERE id = 4")->fetchAll();
-        
-        // Check table relationships
-        $join_test = $pdo->query("
-            SELECT u.id, u.username, u.role, ur.display_name, ur.rank_image 
-            FROM users u 
-            LEFT JOIN user_ranks ur ON u.role = ur.rank_name 
-            WHERE u.id IN (SELECT user_id FROM payment_history WHERE status = 'PAGADO')
-        ")->fetchAll();
-        
-        // Test why the main query fails
-        $debug_query = $pdo->query("
-            SELECT 
-                u.id, 
-                u.username, 
-                u.email,
-                u.role,
-                'Testing' as debug_marker
-            FROM users u
-            WHERE u.id = 4
-        ")->fetchAll();
-        
-        $response = [
-            'success' => true,
-            'query' => $test_query,
-            'result_count' => count($result),
-            'results' => $result,
-            'raw_payment_history' => $raw_history,
-            'user_ranks' => $ranks_query,
-            'user_check' => $user_check,
-            'join_test' => $join_test,
-            'debug_query' => $debug_query,
-            'debug_timestamp' => date('Y-m-d H:i:s'),
-            'debug' => 'Complete test with user existence check'
-        ];
-        
-        echo json_encode($response);
-        exit;
-    } catch (Exception $e) {
-        echo json_encode([
-            'success' => false,
-            'error' => $e->getMessage(), 
-            'query' => $test_query ?? 'N/A',
-            'debug_timestamp' => date('Y-m-d H:i:s')
-        ]);
-        exit;
-    }
-}
-
-// Debug endpoint to check database state
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'debug_db') {
-    header('Content-Type: application/json');
-    
-    try {
-        // Check if table exists
-        $tables = $pdo->query("SHOW TABLES LIKE 'payment_history'")->fetchAll();
-        
-        // Get all records
-        $all_records = $pdo->query("SELECT * FROM payment_history ORDER BY updated_at DESC")->fetchAll();
-        
-        // Get table structure
-        $structure = $pdo->query("DESCRIBE payment_history")->fetchAll();
-        
-        // Also get users table for reference
-        $users_stmt = $pdo->query("SELECT id, username, role FROM users ORDER BY username");
-        $users = $users_stmt->fetchAll();
-        
-        echo json_encode([
-            'table_exists' => count($tables) > 0,
-            'total_records' => count($all_records),
-            'records' => $all_records,
-            'table_structure' => $structure,
-            'users_for_reference' => $users,
-            'debug_timestamp' => date('Y-m-d H:i:s')
-        ]);
-        exit;
-    } catch (Exception $e) {
-        echo json_encode(['error' => $e->getMessage()]);
-        exit;
-    }
-}
 
 // Handle GET request for history data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_history') {
@@ -219,10 +69,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         // Handle clear_history separately (no status validation needed)
         if ($action === 'clear_history') {
-            $stmt = $pdo->prepare("DELETE FROM payment_history");
-            $success = $stmt->execute();
-            
-            echo json_encode(['success' => $success, 'message' => 'Historial limpiado completamente']);
+            $pdo->beginTransaction();
+            try {
+                // Delete all payment history records
+                $stmt = $pdo->prepare("DELETE FROM payment_history WHERE status = 'PAGADO'");
+                $success = $stmt->execute();
+                
+                if ($success) {
+                    $pdo->commit();
+                    echo json_encode(['success' => true, 'message' => 'Historial limpiado completamente']);
+                } else {
+                    $pdo->rollback();
+                    echo json_encode(['success' => false, 'message' => 'Error al limpiar historial']);
+                }
+            } catch (Exception $e) {
+                $pdo->rollback();
+                echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+            }
             exit;
         }
         
@@ -338,11 +201,7 @@ try {
     ");
     $users = $stmt->fetchAll();
     
-    // DEBUG: Log main query results
-    error_log("MAIN QUERY DEBUG - Found " . count($users) . " users in main list");
-    foreach ($users as $user) {
-        error_log("Main list user: " . $user['username'] . " (ID: " . $user['id'] . ") - Status: " . $user['payment_status']);
-    }
+    
     
     // History users: Get payment history and try to match with existing users
     // Use LEFT JOIN to handle cases where user_id in payment_history doesn't exist in users table
@@ -392,9 +251,7 @@ try {
         $all_users = $stmt_all->fetchAll();
     }
     
-    // Debug: Log what we're getting
-    error_log("History query returned " . count($all_users) . " users");
-    error_log("History users: " . json_encode($all_users));
+    
     
 } catch (Exception $e) {
     // Fallback if tables don't exist
@@ -485,16 +342,6 @@ function getSiteTitle() {
         .select2-container--default .select2-selection--single .select2-selection__arrow b {
             border-color: rgba(255, 255, 255, 0.8) transparent transparent transparent;
             margin-top: -2px;
-        }
-        
-        /* Ensure both form groups have same width */
-        .form-row .form-group {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .form-row .form-group:first-child {
-            margin-right: 15px;
         }
         
         /* Dropdown styling with glass effect - EXACT copy from time-manager */
@@ -1122,39 +969,16 @@ function getSiteTitle() {
                 </h3>
             </div>
             
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="userSelect">Usuario:</label>
-                    <select id="userSelect" class="glass-select">
-                        <option value="">Selecciona un usuario...</option>
-                        <?php foreach ($users as $user): ?>
-                            <option value="<?php echo htmlspecialchars($user['username']); ?>">
-                                <?php echo htmlspecialchars($user['username']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <button type="button" id="showAllBtn" class="glass-button" style="margin-top: 25px;">
-                        <i class="fas fa-eye"></i>
-                        Mostrar Todos
-                    </button>
-                </div>
-                
-                <div class="form-group">
-                    <button type="button" id="debugBtn" class="glass-button" style="margin-top: 25px; background: rgba(255, 0, 0, 0.2);">
-                        <i class="fas fa-bug"></i>
-                        Debug DB
-                    </button>
-                </div>
-                
-                <div class="form-group">
-                    <button type="button" id="testQueryBtn" class="glass-button" style="margin-top: 25px; background: rgba(0, 255, 0, 0.2);">
-                        <i class="fas fa-search"></i>
-                        Test Query
-                    </button>
-                </div>
+            <div class="form-group">
+                <label for="userSelect">Usuario:</label>
+                <select id="userSelect" class="glass-select">
+                    <option value="">Selecciona un usuario...</option>
+                    <?php foreach ($users as $user): ?>
+                        <option value="<?php echo htmlspecialchars($user['username']); ?>">
+                            <?php echo htmlspecialchars($user['username']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
         </div>
 
@@ -1171,7 +995,6 @@ function getSiteTitle() {
                             <th>Usuario</th>
                             <th>Rango</th>
                             <th>Estado de Pago</th>
-                            <th>Última Actualización</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
@@ -1200,15 +1023,6 @@ function getSiteTitle() {
                                     </span>
                                 </td>
                                 <td>
-                                    <?php 
-                                    if ($user['payment_updated']) {
-                                        echo date('d/m/Y H:i', strtotime($user['payment_updated']));
-                                    } else {
-                                        echo '<span style="color: rgba(255,255,255,0.5);">Sin registro</span>';
-                                    }
-                                    ?>
-                                </td>
-                                <td>
                                     <div class="action-buttons">
                                         <button class="btn-action btn-pagado" onclick="updatePaymentStatus(<?php echo $user['id']; ?>, 'PAGADO')" data-user-id="<?php echo $user['id']; ?>" data-status="PAGADO">
                                             <i class="fas fa-check-circle"></i> Pagado
@@ -1231,9 +1045,6 @@ function getSiteTitle() {
                 </h3>
                 
                 <div class="history-tabs">
-                    <button class="tab-button active">
-                        <i class="fas fa-check-circle"></i> Historial de Pagados
-                    </button>
                     <button class="btn-clear-history" onclick="clearCompleteHistory()">
                         <i class="fas fa-trash-alt"></i> Limpiar Lista
                     </button>
@@ -1284,16 +1095,11 @@ function getSiteTitle() {
         const mainUsers = <?php echo json_encode($users); ?>;
         let historyUsers = <?php echo json_encode($all_users); ?>;
         
-        // Debug: Log initial data
-        console.log('Initial historyUsers count:', historyUsers.length);
-        console.log('Initial historyUsers data:', historyUsers);
+        
         
         document.addEventListener('DOMContentLoaded', function() {
             setupUserSearch();
             populateHistoryTables();
-            setupShowAllButton();
-            setupDebugButton();
-            setupTestQueryButton();
         });
 
         function setupUserSearch() {
@@ -1332,6 +1138,12 @@ function getSiteTitle() {
                 }
             });
 
+            // Real-time table filtering while typing in search field
+            $(document).on('input', '.select2-search__field', function() {
+                const searchTerm = $(this).val().toLowerCase().trim();
+                filterTableBySearch(searchTerm);
+            });
+
             // Filter table by selected user
             $('#userSelect').on('change', function() {
                 const selectedUserId = $(this).val();
@@ -1354,143 +1166,46 @@ function getSiteTitle() {
                     tableRows.forEach(row => row.style.display = '');
                 }
             });
-        }
 
-        function setupShowAllButton() {
-            const showAllBtn = document.getElementById('showAllBtn');
-            const userSelect = document.getElementById('userSelect');
-            
-            showAllBtn.addEventListener('click', function() {
-                // Clear the dropdown selection
-                $('#userSelect').val('').trigger('change');
-                
-                // Show all rows in the table
-                const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
-                tableRows.forEach(row => {
-                    row.style.display = '';
-                });
-                
-                // Show success notification
-                if (typeof showNotification === 'function') {
-                    showNotification('Mostrando todos los usuarios', 'success');
+            // Clear table filter when dropdown is closed without selection
+            $('#userSelect').on('select2:close', function() {
+                const selectedValue = $(this).val();
+                if (!selectedValue) {
+                    // If no selection, show all users
+                    const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
+                    tableRows.forEach(row => row.style.display = '');
                 }
             });
         }
 
-        function setupDebugButton() {
-            const debugBtn = document.getElementById('debugBtn');
+        function filterTableBySearch(searchTerm) {
+            const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
             
-            debugBtn.addEventListener('click', function() {
-                fetch('lista-pagas.php?action=debug_db')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Estado de la base de datos:', data);
-                    const debugText = `Base de datos Debug:
-Tabla existe: ${data.table_exists}
-Total registros: ${data.total_records}
-Registros: ${JSON.stringify(data.records, null, 2)}`;
-                    
-                    // Create copyable text area
-                    showCopyableResults('Debug DB Results', debugText);
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error al obtener debug: ' + error.message);
+            if (searchTerm === '') {
+                // Show all rows when search is empty
+                tableRows.forEach(row => {
+                    row.style.display = '';
                 });
-            });
-        }
-
-        function setupTestQueryButton() {
-            const testQueryBtn = document.getElementById('testQueryBtn');
-            
-            testQueryBtn.addEventListener('click', function() {
-                fetch('lista-pagas.php?action=test_query')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Resultado query test:', data);
+            } else {
+                // Filter rows based on search term
+                tableRows.forEach(row => {
+                    const userCell = row.cells[0];
+                    const userNameInRow = userCell.querySelector('h4').textContent.toLowerCase();
+                    const userEmailInRow = userCell.querySelector('p').textContent.toLowerCase();
+                    const userRank = row.cells[1].textContent.toLowerCase();
                     
-                    if (!data.success) {
-                        alert('Error en test query: ' + (data.error || 'Respuesta inválida'));
-                        return;
+                    // Check if search term matches username, email, or rank
+                    const matchesUsername = userNameInRow.includes(searchTerm);
+                    const matchesEmail = userEmailInRow.includes(searchTerm);
+                    const matchesRank = userRank.includes(searchTerm);
+                    
+                    if (matchesUsername || matchesEmail || matchesRank) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
                     }
-                    
-                    const queryText = `Test Query Resultado:
-Success: ${data.success}
-Query: ${data.query || 'No disponible'}
-Registros encontrados: ${data.result_count || 0}
-Datos: ${JSON.stringify(data.results || [], null, 2)}
-Raw Payment History: ${JSON.stringify(data.raw_payment_history || [], null, 2)}
-User Check: ${JSON.stringify(data.user_check || [], null, 2)}
-User Ranks: ${JSON.stringify(data.user_ranks || [], null, 2)}
-Join Test: ${JSON.stringify(data.join_test || [], null, 2)}
-Debug Query: ${JSON.stringify(data.debug_query || [], null, 2)}
-Debug Timestamp: ${data.debug_timestamp || 'No disponible'}`;
-                    
-                    // Create copyable text area
-                    showCopyableResults('Test Query Results', queryText);
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error en test query: ' + error.message);
                 });
-            });
-        }
-
-        function showCopyableResults(title, content) {
-            // Create modal with copyable textarea
-            const modal = document.createElement('div');
-            modal.style.cssText = `
-                position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
-                background: rgba(0,0,0,0.8); z-index: 10000; 
-                display: flex; align-items: center; justify-content: center;
-            `;
-            
-            const container = document.createElement('div');
-            container.style.cssText = `
-                background: rgba(255,255,255,0.15); backdrop-filter: blur(15px);
-                border: 1px solid rgba(255,255,255,0.3); border-radius: 12px;
-                padding: 20px; max-width: 80%; max-height: 80%; overflow: auto;
-            `;
-            
-            container.innerHTML = `
-                <h3 style="color: white; margin-bottom: 15px;">${title}</h3>
-                <textarea id="debugResults" style="
-                    width: 100%; height: 400px; background: rgba(0,0,0,0.5); 
-                    color: white; border: 1px solid rgba(255,255,255,0.3); 
-                    border-radius: 8px; padding: 10px; font-family: monospace;
-                    font-size: 12px; resize: vertical;
-                " readonly>${content}</textarea>
-                <div style="margin-top: 15px; text-align: center;">
-                    <button id="copyBtn" style="
-                        background: rgba(156,39,176,0.8); color: white; border: none;
-                        padding: 10px 20px; border-radius: 6px; margin-right: 10px;
-                        cursor: pointer;
-                    ">Copiar</button>
-                    <button id="closeBtn" style="
-                        background: rgba(255,255,255,0.2); color: white; border: none;
-                        padding: 10px 20px; border-radius: 6px; cursor: pointer;
-                    ">Cerrar</button>
-                </div>
-            `;
-            
-            modal.appendChild(container);
-            document.body.appendChild(modal);
-            
-            // Copy functionality
-            document.getElementById('copyBtn').onclick = () => {
-                document.getElementById('debugResults').select();
-                document.execCommand('copy');
-                alert('Copiado al portapapeles!');
-            };
-            
-            // Close functionality
-            document.getElementById('closeBtn').onclick = () => {
-                document.body.removeChild(modal);
-            };
-            
-            modal.onclick = (e) => {
-                if (e.target === modal) document.body.removeChild(modal);
-            };
+            }
         }
 
         function populateHistoryTables() {
@@ -1499,17 +1214,11 @@ Debug Timestamp: ${data.debug_timestamp || 'No disponible'}`;
             // Clear existing content
             pagadoTbody.innerHTML = '';
             
-            // Debug: Log what historyUsers contains
-            console.log('historyUsers array:', historyUsers);
-            console.log('historyUsers length:', historyUsers.length);
-            
             // Always try to fetch fresh data from server to ensure accuracy
-            console.log('Fetching fresh history data from server...');
             fetch('lista-pagas.php?action=get_history')
             .then(response => response.json())
             .then(data => {
                 if (data.success && data.history && data.history.length > 0) {
-                    console.log('Fresh history data from server:', data.history.length, 'records');
                     // Update historyUsers with fresh data
                     historyUsers = data.history;
                     
@@ -1522,10 +1231,8 @@ Debug Timestamp: ${data.debug_timestamp || 'No disponible'}`;
                         }
                     });
                 } else {
-                    console.log('No fresh history data available, using local data');
                     // Use local PHP data as fallback
                     historyUsers.forEach(user => {
-                        console.log('Processing local history user:', user);
                         if (user.payment_status === 'PAGADO') {
                             pagadoTbody.appendChild(createHistoryRow(user, 'PAGADO'));
                         } else if (user.payment_status === 'CANCELADO') {
@@ -1589,9 +1296,60 @@ Debug Timestamp: ${data.debug_timestamp || 'No disponible'}`;
             .then(data => {
                 if (data.success) {
                     showNotification(data.message, 'success');
+                    
+                    // Get the main table body
+                    const mainTableBody = document.querySelector('#paymentsTable tbody');
+                    
+                    // Move all users from history back to main table in real-time
+                    historyUsers.forEach(user => {
+                        if (user.payment_status === 'PAGADO') {
+                            // Create new row in main table with PENDIENTE status
+                            const newRow = document.createElement('tr');
+                            newRow.setAttribute('data-user-id', user.id);
+                            newRow.setAttribute('data-username', user.username.toLowerCase());
+                            
+                            newRow.innerHTML = `
+                                <td>
+                                    <div class="user-info">
+                                        ${user.rank_image && user.rank_image !== '' ? 
+                                            `<img src="${user.rank_image}" alt="Rango" class="user-avatar">` :
+                                            `<div class="user-avatar-placeholder"><i class="fas fa-user"></i></div>`
+                                        }
+                                        <div class="user-details">
+                                            <h4>${user.username}</h4>
+                                            <p>${user.email}</p>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>${user.rank_name || user.role}</td>
+                                <td>
+                                    <span class="status-badge status-pendiente">
+                                        PENDIENTE
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="action-buttons">
+                                        <button class="btn-action btn-pagado" onclick="updatePaymentStatus(${user.id}, 'PAGADO')" data-user-id="${user.id}" data-status="PAGADO">
+                                            <i class="fas fa-check-circle"></i> Pagado
+                                        </button>
+                                    </div>
+                                </td>
+                            `;
+                            
+                            mainTableBody.appendChild(newRow);
+                        }
+                    });
+                    
                     // Clear the history table
-                    document.getElementById('pagado-tbody').innerHTML = '';
+                    const pagadoTbody = document.getElementById('pagado-tbody');
+                    pagadoTbody.innerHTML = '';
+                    
+                    // Clear historyUsers array
                     historyUsers = [];
+                    
+                    // Update the search functionality to include the new rows
+                    setupUserSearch();
+                    
                 } else {
                     showNotification('Error al limpiar historial: ' + data.message, 'error');
                 }
