@@ -64,14 +64,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $file_type = $_FILES['rank_image']['type'];
                 
                 if (in_array($file_type, $allowed_types)) {
-                    $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
-                    $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
-                    $upload_path = 'uploads/rank-images/' . $new_filename;
+                    // Create upload directory if it doesn't exist
+                    $upload_dir = 'uploads/rank-images/';
+                    if (!is_dir($upload_dir)) {
+                        if (!mkdir($upload_dir, 0755, true)) {
+                            $error_message = "Error: No se pudo crear el directorio de subida.";
+                        }
+                    }
                     
-                    if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
-                        $rank_image = $upload_path;
-                    } else {
-                        $error_message = "Error al subir la imagen.";
+                    if (empty($error_message)) {
+                        $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
+                        $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
+                        $upload_path = $upload_dir . $new_filename;
+                        
+                        if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
+                            $rank_image = $upload_path;
+                        } else {
+                            $error_message = "Error al subir la imagen. Verifique los permisos del directorio.";
+                        }
                     }
                 } else {
                     $error_message = "Solo se permiten imágenes JPG, PNG y GIF.";
@@ -137,18 +147,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $file_type = $_FILES['rank_image']['type'];
                 
                 if (in_array($file_type, $allowed_types)) {
-                    $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
-                    $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
-                    $upload_path = 'uploads/rank-images/' . $new_filename;
-                    
-                    if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
-                        // Delete old image if exists
-                        if ($rank_image && file_exists($rank_image)) {
-                            unlink($rank_image);
+                    // Create upload directory if it doesn't exist
+                    $upload_dir = 'uploads/rank-images/';
+                    if (!is_dir($upload_dir)) {
+                        if (!mkdir($upload_dir, 0755, true)) {
+                            $error_message = "Error: No se pudo crear el directorio de subida.";
                         }
-                        $rank_image = $upload_path;
-                    } else {
-                        $error_message = "Error al subir la nueva imagen.";
+                    }
+                    
+                    if (empty($error_message)) {
+                        $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
+                        $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
+                        $upload_path = $upload_dir . $new_filename;
+                        
+                        if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
+                            // Delete old image if exists
+                            if ($rank_image && file_exists($rank_image)) {
+                                unlink($rank_image);
+                            }
+                            $rank_image = $upload_path;
+                        } else {
+                            $error_message = "Error al subir la nueva imagen. Verifique los permisos del directorio.";
+                        }
                     }
                 } else {
                     $error_message = "Solo se permiten imágenes JPG, PNG y GIF.";

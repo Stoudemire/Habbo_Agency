@@ -77,7 +77,13 @@ class TimeManager {
             const data = await response.json();
             
             if (data.success) {
-                const sessions = data.sessions || [];
+                let sessions = data.sessions || [];
+                
+                // If user cannot manage timers, filter to show only their own sessions
+                if (!window.canManageTimers && window.currentUserId) {
+                    sessions = sessions.filter(session => session.user_id == window.currentUserId);
+                }
+                
                 // Update credits per minute from server response
                 if (data.credits_per_minute) {
                     this.creditsPerMinute = parseFloat(data.credits_per_minute);
@@ -111,7 +117,15 @@ class TimeManager {
         
         if (sessions.length === 0) {
             tableBody.innerHTML = '';
-            if (noSessionsDiv) noSessionsDiv.style.display = 'block';
+            if (noSessionsDiv) {
+                noSessionsDiv.style.display = 'block';
+                // Update message based on user permissions
+                const message = window.canManageTimers ? 
+                    'No hay tiempos activos en este momento' : 
+                    'No tienes tiempos activos en este momento';
+                const messageP = noSessionsDiv.querySelector('p');
+                if (messageP) messageP.textContent = message;
+            }
             return;
         }
         

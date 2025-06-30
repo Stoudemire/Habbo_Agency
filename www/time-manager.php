@@ -38,14 +38,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     
     try {
         // Get active sessions with calculated current totals
-        $stmt = $pdo->prepare("
-            SELECT ts.*, u.username 
-            FROM time_sessions ts 
-            JOIN users u ON ts.user_id = u.id 
-            WHERE ts.status IN ('active', 'paused') 
-            ORDER BY u.username ASC
-        ");
-        $stmt->execute();
+        // If user can't manage timers, only show their own sessions
+        if ($can_manage_timers) {
+            $stmt = $pdo->prepare("
+                SELECT ts.*, u.username 
+                FROM time_sessions ts 
+                JOIN users u ON ts.user_id = u.id 
+                WHERE ts.status IN ('active', 'paused') 
+                ORDER BY u.username ASC
+            ");
+            $stmt->execute();
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT ts.*, u.username 
+                FROM time_sessions ts 
+                JOIN users u ON ts.user_id = u.id 
+                WHERE ts.status IN ('active', 'paused') AND ts.user_id = ?
+                ORDER BY u.username ASC
+            ");
+            $stmt->execute([$_SESSION['user_id']]);
+        }
         $active_sessions = $stmt->fetchAll();
         
         // Calculate current totals and credits for JavaScript
@@ -222,14 +234,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             break;
             
         case 'get_active_sessions':
-            $stmt = $pdo->prepare("
-                SELECT ts.*, u.username 
-                FROM time_sessions ts 
-                JOIN users u ON ts.user_id = u.id 
-                WHERE ts.status IN ('active', 'paused') 
-                ORDER BY u.username ASC
-            ");
-            $stmt->execute();
+            // If user can't manage timers, only show their own sessions
+            if ($can_manage_timers) {
+                $stmt = $pdo->prepare("
+                    SELECT ts.*, u.username 
+                    FROM time_sessions ts 
+                    JOIN users u ON ts.user_id = u.id 
+                    WHERE ts.status IN ('active', 'paused') 
+                    ORDER BY u.username ASC
+                ");
+                $stmt->execute();
+            } else {
+                $stmt = $pdo->prepare("
+                    SELECT ts.*, u.username 
+                    FROM time_sessions ts 
+                    JOIN users u ON ts.user_id = u.id 
+                    WHERE ts.status IN ('active', 'paused') AND ts.user_id = ?
+                    ORDER BY u.username ASC
+                ");
+                $stmt->execute([$_SESSION['user_id']]);
+            }
             $sessions = $stmt->fetchAll();
             
             // Calculate current elapsed time for active sessions
@@ -256,14 +280,26 @@ $stmt->execute();
 $users = $stmt->fetchAll();
 
 // Get active sessions with calculated current totals
-$stmt = $pdo->prepare("
-    SELECT ts.*, u.username 
-    FROM time_sessions ts 
-    JOIN users u ON ts.user_id = u.id 
-    WHERE ts.status IN ('active', 'paused') 
-    ORDER BY u.username ASC
-");
-$stmt->execute();
+// If user can't manage timers, only show their own sessions
+if ($can_manage_timers) {
+    $stmt = $pdo->prepare("
+        SELECT ts.*, u.username 
+        FROM time_sessions ts 
+        JOIN users u ON ts.user_id = u.id 
+        WHERE ts.status IN ('active', 'paused') 
+        ORDER BY u.username ASC
+    ");
+    $stmt->execute();
+} else {
+    $stmt = $pdo->prepare("
+        SELECT ts.*, u.username 
+        FROM time_sessions ts 
+        JOIN users u ON ts.user_id = u.id 
+        WHERE ts.status IN ('active', 'paused') AND ts.user_id = ?
+        ORDER BY u.username ASC
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+}
 $active_sessions = $stmt->fetchAll();
 
 // Calculate current totals for JavaScript
@@ -503,7 +539,7 @@ $current_user = $_SESSION['username'];
             <div class="header-content">
                 <h1 class="dashboard-title">
                     <i class="fas fa-clock"></i>
-                    <?php echo $can_manage_timers ? 'Gestor de Tiempos' : 'Tiempos Activos'; ?>
+                    <?php echo $can_manage_timers ? 'Gestor de Tiempos' : 'Mis Tiempos Activos - ' . htmlspecialchars($_SESSION['username']); ?>
                 </h1>
                 
                 <div class="header-actions">
@@ -647,7 +683,7 @@ $current_user = $_SESSION['username'];
                 
                 <div id="noSessions" class="no-sessions" style="display: <?php echo empty($active_sessions) ? 'block' : 'none'; ?>;">
                     <i class="fas fa-clock"></i>
-                    <p>No hay tiempos activos en este momento</p>
+                    <p><?php echo $can_manage_timers ? 'No hay tiempos activos en este momento' : 'No tienes tiempos activos en este momento'; ?></p>
                 </div>
             </div>
         </div>
@@ -661,12 +697,15 @@ $current_user = $_SESSION['username'];
         window.canManageTimers = <?php echo json_encode($can_manage_timers); ?>;
         window.userRole = <?php echo json_encode($user_role); ?>;
         window.creditsPerMinute = <?php echo json_encode($credits_per_minute); ?>;
+        window.currentUserId = <?php echo json_encode($_SESSION['user_id']); ?>;
+        window.currentUsername = <?php echo json_encode($_SESSION['username']); ?>;
         
         console.log('Data loaded:', {
             users: window.usersData,
             sessions: window.activeSessionsData,
             canManage: window.canManageTimers,
-            role: window.userRole
+            role: window.userRole,
+            currentUser: window.currentUsername
         });
     </script>
     
