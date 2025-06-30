@@ -143,6 +143,7 @@ function setupPasswordValidation() {
                 updatePasswordStrength(password);
             } else {
                 requirementsDiv.style.display = 'none';
+                updateVerificationButtonState();
             }
             
             // Also check confirm password if it has content
@@ -152,7 +153,16 @@ function setupPasswordValidation() {
         // Real-time validation for confirm password
         newConfirmPasswordInput.addEventListener('input', function() {
             validatePasswordMatch(newPasswordInput, newConfirmPasswordInput, matchDiv);
+            updateVerificationButtonState();
         });
+        
+        // Add event listener for habbo username
+        const habboUsernameInput = modal.querySelector('#habbo_username');
+        if (habboUsernameInput) {
+            habboUsernameInput.addEventListener('input', function() {
+                updateVerificationButtonState();
+            });
+        }
         
         // Hide requirements when field loses focus and is empty
         newPasswordInput.addEventListener('blur', function() {
@@ -188,6 +198,9 @@ function validatePasswordMatch(passwordInput, confirmPasswordInput, matchDiv) {
         matchDiv.className = 'password-match invalid';
         matchDiv.style.display = 'block';
     }
+    
+    // Update verification button state after password match check
+    updateVerificationButtonState();
 }
 
 function updatePasswordRequirements(password) {
@@ -233,6 +246,7 @@ function updatePasswordStrength(password) {
         strengthFill.style.backgroundColor = '#ff4757';
         strengthText.textContent = 'Muy débil';
         strengthText.style.color = '#ff4757';
+        updateVerificationButtonState();
         return;
     }
     
@@ -254,6 +268,38 @@ function updatePasswordStrength(password) {
     strengthFill.style.transition = 'all 0.3s ease';
     strengthText.textContent = level.text;
     strengthText.style.color = level.color;
+    
+    // Update verification button state
+    updateVerificationButtonState();
+}
+
+// Check if all form requirements are met and enable/disable verification button
+function updateVerificationButtonState() {
+    const modal = document.getElementById('registerModal');
+    if (!modal) return;
+    
+    const passwordInput = modal.querySelector('input[name="password"]');
+    const confirmPasswordInput = modal.querySelector('input[name="confirmPassword"]');
+    const habboUsernameInput = modal.querySelector('#habbo_username');
+    const startVerificationBtn = document.getElementById('start_verification_btn');
+    
+    if (!passwordInput || !confirmPasswordInput || !habboUsernameInput || !startVerificationBtn) return;
+    
+    const password = passwordInput.value;
+    const confirmPassword = confirmPasswordInput.value;
+    const habboUsername = habboUsernameInput.value.trim();
+    
+    // Check if password meets all requirements
+    const passwordErrors = validatePassword(password);
+    const passwordsMatch = password === confirmPassword && password.length > 0;
+    const hasUsername = habboUsername.length > 0;
+    
+    // Enable button only if all conditions are met
+    const canProceed = passwordErrors.length === 0 && passwordsMatch && hasUsername;
+    
+    startVerificationBtn.disabled = !canProceed;
+    startVerificationBtn.style.opacity = canProceed ? '1' : '0.5';
+    startVerificationBtn.style.cursor = canProceed ? 'pointer' : 'not-allowed';
 }
 
 // Form validation
@@ -308,6 +354,13 @@ function openModal(modalId) {
         // Setup password validation if it's the register modal
         if (modalId === 'registerModal') {
             setupPasswordValidation();
+            // Disable verification button initially
+            const startVerificationBtn = document.getElementById('start_verification_btn');
+            if (startVerificationBtn) {
+                startVerificationBtn.disabled = true;
+                startVerificationBtn.style.opacity = '0.5';
+                startVerificationBtn.style.cursor = 'not-allowed';
+            }
         }
     }
 }
