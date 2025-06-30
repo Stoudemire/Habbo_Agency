@@ -57,12 +57,17 @@ $username = $user['username'];
 $user_role = $user['role'];
 $userInitial = strtoupper(substr($username, 0, 1));
 
-// Get user rank information
+// Get user rank information with permissions
 $rank_info = null;
+$user_permissions = [];
 try {
     $stmt = $pdo->prepare("SELECT * FROM user_ranks WHERE rank_name = ?");
     $stmt->execute([$user_role]);
     $rank_info = $stmt->fetch();
+    
+    if ($rank_info && !empty($rank_info['permissions'])) {
+        $user_permissions = json_decode($rank_info['permissions'], true) ?: [];
+    }
 } catch (Exception $e) {
     // If no rank found, create default info
     $rank_info = [
@@ -70,6 +75,17 @@ try {
         'rank_image' => null,
         'description' => 'Usuario del sistema'
     ];
+    $user_permissions = [];
+}
+
+// Function to check if user has specific permission
+function hasPermission($permission, $user_permissions, $user_role) {
+    // Super admin always has all permissions
+    if ($user_role === 'super_admin') {
+        return true;
+    }
+    
+    return in_array($permission, $user_permissions);
 }
 
 // Handle access denied error
@@ -285,19 +301,19 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             </div>
         </div>
 
-        <!-- Dashboard Content Based on Role -->
+        <!-- Dashboard Content Based on Permissions -->
         <div class="dashboard-grid">
-            <!-- Time Manager Card - Available to ALL users -->
+            <!-- Time Manager Card - Available to users with manage_time permission or ALL users can view -->
             <div class="dashboard-card" onclick="window.location.href='time-manager.php'" style="cursor: pointer;">
                 <h3 class="card-title">
-                    <i class="fas fa-<?php echo in_array($user_role, ['super_admin', 'administrador', 'operador']) ? 'clock' : 'eye'; ?>"></i>
-                    <?php echo in_array($user_role, ['super_admin', 'administrador', 'operador']) ? 'Gestor de Tiempos' : 'Ver Tiempos Activos'; ?>
+                    <i class="fas fa-<?php echo hasPermission('manage_time', $user_permissions, $user_role) ? 'clock' : 'eye'; ?>"></i>
+                    <?php echo hasPermission('manage_time', $user_permissions, $user_role) ? 'Gestor de Tiempos' : 'Mis Tiempos Activos'; ?>
                 </h3>
                 <p class="card-description">
-                    <?php if (in_array($user_role, ['super_admin', 'administrador', 'operador'])): ?>
-                        Control total de tiempos de trabajo. Inicia, pausa y gestiona cronómetros para todos los usuarios.
+                    <?php if (hasPermission('manage_time', $user_permissions, $user_role)): ?>
+                        Controla los tiempos de trabajo de todos los usuarios. Inicia, pausa y gestiona cronómetros del equipo.
                     <?php else: ?>
-                        Consulta los tiempos activos y estados de sesión de todos los usuarios en tiempo real.
+                        Consulta tus tiempos activos y el estado de tu sesión de trabajo actual.
                     <?php endif; ?>
                 </p>
             </div>
@@ -306,108 +322,63 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             <div class="dashboard-card" onclick="window.location.href='schedule.php'" style="cursor: pointer;">
                 <h3 class="card-title">
                     <i class="fas fa-calendar-alt"></i>
-                    Horarios de la Agencia
+                    Horarios de Apertura
                 </h3>
                 <p class="card-description">
-                    <?php if (in_array($user_role, ['super_admin', 'administrador'])): ?>
-                        Consulta y configura los horarios de apertura, días especiales y calendario de la agencia.
-                    <?php else: ?>
-                        Consulta los horarios de apertura, días especiales y cuando está abierta la agencia.
-                    <?php endif; ?>
+                    Consulta los horarios de funcionamiento de la agencia, días especiales y estados de apertura en tiempo real.
                 </p>
             </div>
             
-            <?php if ($user_role === 'super_admin' || $user_role === 'administrador'): ?>
-            <!-- Administrator Dashboard -->
-            <div class="dashboard-card" onclick="window.location.href='developer-panel.php'" style="cursor: pointer;">
-                <h3 class="card-title">
-                    <i class="fas fa-cog"></i>
-                    Configuración del Sistema
-                </h3>
-                <p class="card-description">
-                    Configuración avanzada del sistema. Modifica colores, logos, títulos y parámetros técnicos de la plataforma.
-                </p>
-            </div>
-            
+            <?php if (hasPermission('admin_panel', $user_permissions, $user_role)): ?>
+            <!-- Admin Panel Card - Only for users with admin_panel permission -->
             <div class="dashboard-card" onclick="window.location.href='admin-panel.php'" style="cursor: pointer;">
                 <h3 class="card-title">
                     <i class="fas fa-users-cog"></i>
-                    Panel de Administrador
+                    Panel Administrativo
                 </h3>
                 <p class="card-description">
-                    Gestión completa de usuarios. Crear, editar y eliminar cuentas. Asignar roles y permisos.
+                    Gestión completa de usuarios del sistema. Administra cuentas, asigna roles y controla permisos de acceso.
                 </p>
             </div>
+            <?php endif; ?>
             
+            <?php if (hasPermission('manage_roles', $user_permissions, $user_role)): ?>
+            <!-- Rank Management Card - Only for users with manage_roles permission -->
             <div class="dashboard-card" onclick="window.location.href='rank-management.php'" style="cursor: pointer;">
                 <h3 class="card-title">
                     <i class="fas fa-crown"></i>
                     Gestión de Rangos
                 </h3>
                 <p class="card-description">
-                    Crear y administrar rangos del sistema. Define permisos, niveles y atributos para cada tipo de usuario.
+                    Administra los rangos del sistema. Crea nuevos roles, define permisos y configura niveles de acceso.
                 </p>
             </div>
-
-            <div class="dashboard-card" onclick="window.location.href='lista-pagas.php'" style="cursor: pointer;">
-                <h3 class="card-title">
-                    <i class="fas fa-money-bill-wave"></i>
-                    Lista de Pagas
-                </h3>
-                <p class="card-description">
-                    Administrar pagos y estados de todos los usuarios. Control completo de historial de pagos.
-                </p>
-            </div>
+            <?php endif; ?>
             
-            <?php elseif ($user_role === 'administrador'): ?>
-            <!-- Administrator Dashboard - Full Access like Developer -->
-            <div class="dashboard-card" onclick="window.location.href='admin-panel.php'" style="cursor: pointer;">
-                <h3 class="card-title">
-                    <i class="fas fa-users-cog"></i>
-                    Panel de Administrador
-                </h3>
-                <p class="card-description">
-                    Gestión completa de usuarios. Crear, editar y eliminar cuentas. Asignar roles y permisos.
-                </p>
-            </div>
-            
-            <div class="dashboard-card" onclick="window.location.href='rank-management.php'" style="cursor: pointer;">
-                <h3 class="card-title">
-                    <i class="fas fa-crown"></i>
-                    Gestión de Rangos
-                </h3>
-                <p class="card-description">
-                    Crear y administrar rangos del sistema. Define permisos, niveles y atributos para cada tipo de usuario.
-                </p>
-            </div>
-            
+            <?php if (hasPermission('manage_config', $user_permissions, $user_role)): ?>
+            <!-- System Configuration Card - Only for users with manage_config permission -->
             <div class="dashboard-card" onclick="window.location.href='developer-panel.php'" style="cursor: pointer;">
                 <h3 class="card-title">
-                    <i class="fas fa-cog"></i>
-                    Configuración del Sistema
+                    <i class="fas fa-tools"></i>
+                    Panel de Desarrollador
                 </h3>
                 <p class="card-description">
-                    Configuración avanzada del sistema. Modifica colores, logos, títulos y parámetros técnicos de la plataforma.
+                    Configuración avanzada del sistema. Personaliza la apariencia, logos, títulos y parámetros técnicos.
                 </p>
             </div>
+            <?php endif; ?>
 
+            <?php if (hasPermission('manage_users', $user_permissions, $user_role)): ?>
+            <!-- User Management Card - Only for users with manage_users permission -->
             <div class="dashboard-card" onclick="window.location.href='lista-pagas.php'" style="cursor: pointer;">
                 <h3 class="card-title">
                     <i class="fas fa-money-bill-wave"></i>
                     Lista de Pagas
                 </h3>
                 <p class="card-description">
-                    Administrar pagos y estados de todos los usuarios. Control completo de historial de pagos.
+                    Gestiona los pagos del personal. Marca usuarios como pagados y mantén un historial de transacciones.
                 </p>
             </div>
-            
-            <?php elseif ($user_role === 'operador'): ?>
-            <!-- Operator Dashboard -->
-            
-            <?php else: // usuario ?>
-            <!-- Regular User Dashboard -->
-            <!-- Los usuarios solo ven las opciones generales arriba -->
-            
             <?php endif; ?>
             
         </div>

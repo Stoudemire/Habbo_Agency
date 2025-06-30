@@ -21,9 +21,24 @@ if (!$user) {
     $user = $_SESSION['user_data'];
 }
 
-// Only super_admin, developers and administrators can access this page
-if (!in_array($user['role'], ['super_admin', 'administrador'])) {
-    header('Location: dashboard.php');
+// Check user permissions for rank management
+$user_permissions = [];
+try {
+    $stmt = $pdo->prepare("SELECT permissions FROM user_ranks WHERE rank_name = ?");
+    $stmt->execute([$user['role']]);
+    $rank_permissions = $stmt->fetchColumn();
+    if ($rank_permissions) {
+        $user_permissions = json_decode($rank_permissions, true) ?: [];
+    }
+} catch (Exception $e) {
+    $user_permissions = [];
+}
+
+// Check if user has manage_roles permission
+$has_rank_permission = ($user['role'] === 'super_admin') || in_array('manage_roles', $user_permissions);
+
+if (!$has_rank_permission) {
+    header('Location: dashboard.php?error=access_denied');
     exit();
 }
 
@@ -33,16 +48,13 @@ $stmt->execute();
 $config = $stmt->fetch();
 $site_title = $config ? $config['site_title'] : 'Habbo Agency';
 
-// Define available permissions
+// Define available permissions (only implemented features)
 $available_permissions = [
-    'manage_users' => 'Gestionar Usuarios',
-    'manage_time' => 'Gestionar Tiempos',
-    'view_reports' => 'Ver Reportes',
-    'manage_system' => 'Gestionar Sistema',
-    'manage_roles' => 'Gestionar Roles',
-    'view_logs' => 'Ver Registros',
-    'manage_config' => 'Gestionar Configuración',
-    'admin_panel' => 'Panel Administrativo'
+    'admin_panel' => 'Panel Administrativo',
+    'manage_roles' => 'Gestión de Rangos',
+    'manage_config' => 'Configuración del Sistema',
+    'manage_users' => 'Lista de Pagas',
+    'manage_time' => 'Gestionar Tiempos'
 ];
 
 // Handle form submissions
@@ -57,12 +69,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $level = intval($_POST['level']);
             $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
             $rank_image = null;
-            
+
             // Handle image upload
             if (isset($_FILES['rank_image']) && $_FILES['rank_image']['error'] === UPLOAD_ERR_OK) {
                 $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
                 $file_type = $_FILES['rank_image']['type'];
-                
+
                 if (in_array($file_type, $allowed_types)) {
                     // Create upload directory if it doesn't exist
                     $upload_dir = 'uploads/rank-images/';
@@ -71,12 +83,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error_message = "Error: No se pudo crear el directorio de subida.";
                         }
                     }
-                    
+
                     if (empty($error_message)) {
                         $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
                         $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
                         $upload_path = $upload_dir . $new_filename;
-                        
+
                         if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
                             $rank_image = $upload_path;
                         } else {
@@ -87,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_message = "Solo se permiten imágenes JPG, PNG y GIF.";
                 }
             }
-            
+
             if (empty($rank_name) || empty($display_name) || $level < 1) {
                 $error_message = "Todos los campos son obligatorios y el nivel debe ser mayor a 0.";
             } else {
@@ -128,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $display_name = trim($_POST['display_name']);
             $level = intval($_POST['level']);
             $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
-            
+
             // Get current rank data for image handling
             $rank_image = null; // Default value
             try {
@@ -140,12 +152,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Column might not exist yet, ignore error
                 $rank_image = null;
             }
-            
+
             // Handle new image upload
             if (isset($_FILES['rank_image']) && $_FILES['rank_image']['error'] === UPLOAD_ERR_OK) {
                 $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
                 $file_type = $_FILES['rank_image']['type'];
-                
+
                 if (in_array($file_type, $allowed_types)) {
                     // Create upload directory if it doesn't exist
                     $upload_dir = 'uploads/rank-images/';
@@ -154,12 +166,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error_message = "Error: No se pudo crear el directorio de subida.";
                         }
                     }
-                    
+
                     if (empty($error_message)) {
                         $file_extension = pathinfo($_FILES['rank_image']['name'], PATHINFO_EXTENSION);
                         $new_filename = 'rank_' . uniqid() . '.' . $file_extension;
                         $upload_path = $upload_dir . $new_filename;
-                        
+
                         if (move_uploaded_file($_FILES['rank_image']['tmp_name'], $upload_path)) {
                             // Delete old image if exists
                             if ($rank_image && file_exists($rank_image)) {
@@ -174,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_message = "Solo se permiten imágenes JPG, PNG y GIF.";
                 }
             }
-            
+
             if (empty($rank_name) || empty($display_name) || $level < 1) {
                 $error_message = "Todos los campos son obligatorios y el nivel debe ser mayor a 0.";
             } else {
@@ -211,12 +223,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($_POST['action'] === 'delete_rank') {
             $rank_id = intval($_POST['rank_id']);
-            
+
             // Don't allow deletion of core ranks
             $stmt = $pdo->prepare("SELECT rank_name FROM user_ranks WHERE id = ?");
             $stmt->execute([$rank_id]);
             $rank = $stmt->fetch();
-            
+
             if ($rank && !in_array($rank['rank_name'], ['super_admin', 'administrador', 'operador', 'usuario'])) {
                 $stmt = $pdo->prepare("DELETE FROM user_ranks WHERE id = ?");
                 if ($stmt->execute([$rank_id])) {
@@ -269,7 +281,7 @@ try {
             z-index: 1000;
             backdrop-filter: blur(5px);
         }
-        
+
         .rank-modal-content {
             position: absolute;
             top: 50%;
@@ -287,7 +299,7 @@ try {
             box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
             position: relative;
         }
-        
+
         .modal-close-btn {
             position: absolute;
             top: 15px;
@@ -306,23 +318,23 @@ try {
             font-size: 18px;
             transition: all 0.3s ease;
         }
-        
+
         .modal-close-btn:hover {
             background: rgba(255, 255, 255, 0.2);
             transform: scale(1.1);
         }
-        
+
         /* Glass-morphism scrollbar like time-manager */
         .rank-modal-content::-webkit-scrollbar {
             width: 12px;
         }
-        
+
         .rank-modal-content::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 6px;
             backdrop-filter: blur(10px);
         }
-        
+
         .rank-modal-content::-webkit-scrollbar-thumb {
             background: linear-gradient(135deg, 
                 rgba(156, 39, 176, 0.4), 
@@ -331,7 +343,7 @@ try {
             border: 2px solid rgba(255, 255, 255, 0.1);
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
         }
-        
+
         .rank-modal-content::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(135deg, 
                 rgba(156, 39, 176, 0.7), 
@@ -339,13 +351,13 @@ try {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
             transform: scale(1.1);
         }
-        
+
         .rank-modal-content::-webkit-scrollbar-thumb:active {
             background: linear-gradient(135deg, 
                 rgba(156, 39, 176, 0.9), 
                 rgba(120, 30, 140, 1));
         }
-        
+
         .rank-modal h3 {
             text-align: center;
             margin-bottom: 30px;
@@ -355,11 +367,11 @@ try {
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
+
         .rank-form-group {
             margin-bottom: 25px;
         }
-        
+
         .rank-form-group label {
             display: block;
             margin-bottom: 8px;
@@ -367,7 +379,7 @@ try {
             font-weight: bold;
             font-size: 1.1em;
         }
-        
+
         .rank-form-group input,
         .rank-form-group select {
             width: 100%;
@@ -379,34 +391,34 @@ try {
             font-size: 1em;
             backdrop-filter: blur(10px);
         }
-        
+
         .rank-form-group input:focus,
         .rank-form-group select:focus {
             outline: none;
             border-color: #9c27b0;
             box-shadow: 0 0 15px rgba(156, 39, 176, 0.3);
         }
-        
+
         .rank-form-group input::placeholder {
             color: rgba(255, 255, 255, 0.7);
         }
-        
+
         .permissions-section {
             margin-top: 30px;
         }
-        
+
         .permissions-section h4 {
             color: #fff;
             margin-bottom: 20px;
             font-size: 1.2em;
         }
-        
+
         .permissions-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 15px;
         }
-        
+
         .permission-item {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -417,33 +429,33 @@ try {
             gap: 12px;
             transition: all 0.3s ease;
         }
-        
+
         .permission-item:hover {
             background: rgba(255, 255, 255, 0.1);
             border-color: rgba(156, 39, 176, 0.5);
         }
-        
+
         .permission-item input[type="checkbox"] {
             width: 20px;
             height: 20px;
             accent-color: #9c27b0;
             cursor: pointer;
         }
-        
+
         .permission-item label {
             color: #fff;
             cursor: pointer;
             font-size: 0.95em;
             margin: 0;
         }
-        
+
         .rank-modal-actions {
             display: flex;
             gap: 15px;
             justify-content: center;
             margin-top: 40px;
         }
-        
+
         .btn-primary {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -458,13 +470,13 @@ try {
             align-items: center;
             gap: 8px;
         }
-        
+
         .btn-primary:hover {
             background: rgba(255, 255, 255, 0.2);
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
-        
+
         .btn-secondary {
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(10px);
@@ -479,13 +491,13 @@ try {
             align-items: center;
             gap: 8px;
         }
-        
+
         .btn-secondary:hover {
             background: rgba(255, 255, 255, 0.1);
             color: white;
             transform: translateY(-2px);
         }
-        
+
         .rank-card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -495,24 +507,24 @@ try {
             margin-bottom: 20px;
             transition: all 0.3s ease;
         }
-        
+
         .rank-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
         }
-        
+
         .rank-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .rank-title-section {
             display: flex;
             align-items: center;
             gap: 15px;
         }
-        
+
         .rank-image {
             width: 70px;
             height: 70px;
@@ -521,7 +533,7 @@ try {
             border: 2px solid rgba(255, 255, 255, 0.3);
             box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
         }
-        
+
         .rank-image-placeholder {
             width: 70px;
             height: 70px;
@@ -535,13 +547,13 @@ try {
             font-size: 2em;
             margin-bottom: 20px;
         }
-        
+
         .rank-name {
             font-size: 1.6em;
             font-weight: bold;
             color: #fff;
         }
-        
+
         .rank-level {
             background: linear-gradient(45deg, #9c27b0, #673ab7);
             color: white;
@@ -550,14 +562,14 @@ try {
             font-size: 0.9em;
             font-weight: bold;
         }
-        
+
         .permissions-display {
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
             margin: 20px 0;
         }
-        
+
         .permission-tag {
             background: rgba(156, 39, 176, 0.3);
             color: white;
@@ -566,13 +578,13 @@ try {
             font-size: 0.85em;
             border: 1px solid rgba(156, 39, 176, 0.5);
         }
-        
+
         .rank-actions {
             display: flex;
             gap: 12px;
             margin-top: 20px;
         }
-        
+
         .btn-edit-rank {
             background: linear-gradient(45deg, #2196f3, #1976d2);
             color: white;
@@ -584,12 +596,12 @@ try {
             transition: all 0.3s ease;
             margin-right: 10px;
         }
-        
+
         .btn-edit-rank:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
         }
-        
+
         .btn-delete-rank {
             background: linear-gradient(45deg, #f44336, #d32f2f);
             color: white;
@@ -600,12 +612,12 @@ try {
             font-size: 0.9em;
             transition: all 0.3s ease;
         }
-        
+
         .btn-delete-rank:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4);
         }
-        
+
         .section-header {
             display: flex;
             justify-content: space-between;
@@ -614,26 +626,26 @@ try {
             flex-wrap: wrap;
             gap: 15px;
         }
-        
+
         .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: rgba(255, 255, 255, 0.7);
         }
-        
+
         .empty-state i {
             font-size: 4em;
             margin-bottom: 20px;
             opacity: 0.5;
             display: block;
         }
-        
+
         .empty-state h3 {
             font-size: 1.5em;
             margin-bottom: 10px;
             color: #fff;
         }
-        
+
         .empty-state p {
             font-size: 1.1em;
             opacity: 0.8;
@@ -675,28 +687,28 @@ try {
             font-weight: bold;
             color: #ef4444;
         }
-        
+
         .ranks-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
-        
+
         .rank-info {
             margin: 15px 0;
         }
-        
+
         .rank-info p {
             color: rgba(255, 255, 255, 0.9);
             margin: 0;
         }
-        
+
         .no-permissions {
             opacity: 0.6;
             font-style: italic;
         }
-        
+
         .system-rank-label {
             background: rgba(255, 193, 7, 0.2);
             color: #ffc107;
@@ -719,7 +731,7 @@ try {
                     <i class="fas fa-users-cog"></i>
                     Gestión de Rangos
                 </h1>
-                
+
                 <div class="header-actions">
                     <a href="dashboard.php" class="back-btn">
                         <i class="fas fa-arrow-left"></i>
@@ -781,11 +793,11 @@ try {
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="rank-info">
                                     <p><strong>Sistema:</strong> <?php echo htmlspecialchars($rank['rank_name']); ?></p>
                                 </div>
-                                
+
                                 <div class="permissions-display">
                                     <?php 
                                     $permissions = json_decode($rank['permissions'], true) ?: [];
@@ -799,10 +811,10 @@ try {
                                         <?php endforeach; ?>
                                     <?php endif; ?>
                                 </div>
-                                
+
                                 <div class="rank-actions">
                                     <?php if (!in_array($rank['rank_name'], ['super_admin', 'administrador', 'operador', 'usuario'])): ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, <?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>)">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>')">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -815,7 +827,7 @@ try {
                                             </button>
                                         </form>
                                     <?php else: ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, <?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>)">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>')">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -845,28 +857,28 @@ try {
             <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="create_rank" id="modal-action">
                 <input type="hidden" name="rank_id" value="" id="modal-rank-id">
-                
+
                 <div class="rank-form-group">
                     <label for="rank_name">Nombre del Sistema:</label>
                     <input type="text" id="rank_name" name="rank_name" required placeholder="ej: moderador">
                 </div>
-                
+
                 <div class="rank-form-group">
                     <label for="display_name">Nombre para Mostrar:</label>
                     <input type="text" id="display_name" name="display_name" required placeholder="ej: Moderador">
                 </div>
-                
+
                 <div class="rank-form-group">
                     <label for="level">Nivel (1-999):</label>
                     <input type="number" id="level" name="level" min="1" max="999" required placeholder="ej: 50">
                 </div>
-                
+
                 <div class="rank-form-group">
                     <label for="rank_image">Imagen del Rango:</label>
                     <input type="file" id="rank_image" name="rank_image" accept="image/*" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 10px; padding: 12px; color: white; width: 100%;">
                     <small style="color: rgba(255, 255, 255, 0.7); font-size: 0.9em; margin-top: 5px; display: block;">Formatos permitidos: JPG, PNG, GIF. Tamaño recomendado: 64x64px</small>
                 </div>
-                
+
                 <div class="permissions-section">
                     <h4><i class="fas fa-key"></i> Permisos del Rango</h4>
                     <div class="permissions-grid">
@@ -878,7 +890,7 @@ try {
                         <?php endforeach; ?>
                     </div>
                 </div>
-                
+
                 <div class="rank-modal-actions">
                     <button type="submit" class="btn-primary" id="modal-submit-btn">
                         <i class="fas fa-save"></i>
@@ -900,34 +912,34 @@ try {
             document.getElementById('modal-action').value = 'create_rank';
             document.getElementById('modal-rank-id').value = '';
             document.getElementById('modal-submit-btn').innerHTML = '<i class="fas fa-save"></i> Crear Rango';
-            
+
             // Clear form
             document.getElementById('rank_name').value = '';
             document.getElementById('display_name').value = '';
             document.getElementById('level').value = '';
             document.getElementById('rank_image').value = '';
-            
+
             // Uncheck all permissions
             const checkboxes = document.querySelectorAll('input[name="permissions[]"]');
             checkboxes.forEach(checkbox => checkbox.checked = false);
-            
+
             document.getElementById('rankModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
-        
+
         function openEditRankModal(rankId, rankName, displayName, level, permissions) {
             // Set modal for edit mode
             document.getElementById('modal-title').innerHTML = '<i class="fas fa-edit"></i> Editar Rango';
             document.getElementById('modal-action').value = 'edit_rank';
             document.getElementById('modal-rank-id').value = rankId;
             document.getElementById('modal-submit-btn').innerHTML = '<i class="fas fa-save"></i> Actualizar Rango';
-            
+
             // Fill form with current values
             document.getElementById('rank_name').value = rankName;
             document.getElementById('display_name').value = displayName;
             document.getElementById('level').value = level;
             document.getElementById('rank_image').value = ''; // Clear image field for new upload
-            
+
             // Parse and set permissions
             let permissionsArray = [];
             try {
@@ -935,11 +947,11 @@ try {
             } catch (e) {
                 permissionsArray = [];
             }
-            
+
             // Uncheck all permissions first
             const checkboxes = document.querySelectorAll('input[name="permissions[]"]');
             checkboxes.forEach(checkbox => checkbox.checked = false);
-            
+
             // Check the permissions for this rank
             permissionsArray.forEach(permission => {
                 const checkbox = document.querySelector(`input[value="${permission}"]`);
@@ -947,16 +959,16 @@ try {
                     checkbox.checked = true;
                 }
             });
-            
+
             document.getElementById('rankModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
-        
+
         function closeRankModal() {
             document.getElementById('rankModal').style.display = 'none';
             document.body.style.overflow = 'auto';
         }
-        
+
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('rankModal');
@@ -964,7 +976,7 @@ try {
                 closeRankModal();
             }
         }
-        
+
         // Close modal with Escape key
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Escape') {
