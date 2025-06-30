@@ -1,6 +1,36 @@
 <?php
 session_start();
 
+// Function to validate password security
+function isPasswordSecure($password) {
+    // Minimum 8 characters
+    if (strlen($password) < 8) {
+        return false;
+    }
+    
+    // At least one lowercase letter
+    if (!preg_match('/[a-z]/', $password)) {
+        return false;
+    }
+    
+    // At least one uppercase letter
+    if (!preg_match('/[A-Z]/', $password)) {
+        return false;
+    }
+    
+    // At least one number
+    if (!preg_match('/\d/', $password)) {
+        return false;
+    }
+    
+    // At least one special character
+    if (!preg_match('/[!@#$%^&*(),.?":{}|<>]/', $password)) {
+        return false;
+    }
+    
+    return true;
+}
+
 // Check if user is logged in
 if (isset($_SESSION['user_id'])) {
     header('Location: dashboard.php');
@@ -60,6 +90,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'register' && $_SERVER['REQU
         $register_error = "El campo confirmar contraseña es requerido";
     } elseif ($password !== $confirmPassword) {
         $register_error = "Las contraseñas no coinciden";
+    } elseif (!isPasswordSecure($password)) {
+        $register_error = "La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y caracteres especiales";
     } elseif ($habbo_verified !== 'true') {
         $register_error = "Debes verificar tu cuenta de Habbo antes de continuar";
     } elseif (empty($verification_code)) {
@@ -204,6 +236,61 @@ if (isset($_POST['action']) && $_POST['action'] === 'register' && $_SERVER['REQU
         </div>
     </div>
 
+    <!-- Habbo Verification Modal -->
+    <div id="verificationModal" class="modal-overlay" style="display: none;">
+        <div class="form-modal verification-modal">
+            <button class="close-btn" onclick="closeModal('verificationModal')">
+                <i class="fas fa-times"></i>
+            </button>
+            
+            <h2 class="modal-title">
+                <i class="fas fa-user-shield"></i>
+                Verificación de Habbo
+            </h2>
+            
+            <div class="verification-content">
+                <div class="verification-info">
+                    <p class="verification-description">
+                        Para verificar tu cuenta de Habbo, necesitas colocar el siguiente código en tu misión y luego hacer clic en verificar.
+                    </p>
+                </div>
+                
+                <div class="form-group">
+                    <label>Tu nombre de Habbo</label>
+                    <input type="text" id="verification_habbo_username" placeholder="Nombre de Habbo" class="glass-input" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>Código de verificación</label>
+                    <div class="verification-code-container">
+                        <div class="verification-code-display" id="display_code"></div>
+                        <button type="button" class="refresh-code-btn" id="generate_new_code_btn" title="Generar nuevo código">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    </div>
+                    <p class="verification-instructions">
+                        <i class="fas fa-info-circle"></i>
+                        Copia este código y colócalo en tu misión de Habbo
+                    </p>
+                </div>
+                
+                <div class="verification-timer">
+                    <i class="fas fa-clock"></i>
+                    Código válido por: <span id="timer">10:00</span>
+                </div>
+                
+                <div id="verification_messages" class="verification-messages"></div>
+                
+                <div class="button-center">
+                    <button type="button" class="glass-button" id="verify_mission_btn">
+                        <i class="fas fa-check-circle"></i>
+                        Verificar misión
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Register Modal -->
     <div id="registerModal" class="modal-overlay" style="display: none;">
         <div class="form-modal">
@@ -230,32 +317,11 @@ if (isset($_POST['action']) && $_POST['action'] === 'register' && $_SERVER['REQU
                     <input type="text" name="habbo_username" id="habbo_username" placeholder="Tu nombre en Habbo" class="glass-input" required>
                 </div>
                 
-                <div id="verification_step" class="verification-step" style="display: none;">
-                    <div class="verification-info">
-                        <h4><i class="fas fa-shield-alt"></i> Verificación de Habbo</h4>
-                        <p>Coloca este código en tu misión de Habbo:</p>
-                        <div class="verification-code" id="display_code"></div>
-                        <p class="verification-instructions">
-                            1. Ve a tu perfil de Habbo<br>
-                            2. Edita tu misión<br>
-                            3. Coloca exactamente el código mostrado<br>
-                            4. Haz clic en "Verificar misión"
-                        </p>
-                        <div class="verification-timer">
-                            Código válido por: <span id="timer">10:00</span>
-                        </div>
+                <div id="verification_status" class="verification-status-display" style="display: none;">
+                    <div class="status-icon">
+                        <i class="fas fa-check-circle"></i>
                     </div>
-                    
-                    <div class="button-center">
-                        <button type="button" class="glass-button" id="verify_mission_btn">
-                            <i class="fas fa-check-circle"></i>
-                            Verificar misión
-                        </button>
-                        <button type="button" class="glass-button" id="generate_new_code_btn">
-                            <i class="fas fa-redo"></i>
-                            Nuevo código
-                        </button>
-                    </div>
+                    <p class="status-text">Cuenta de Habbo verificada correctamente</p>
                 </div>
                 
                 <div class="form-group">
