@@ -17,7 +17,23 @@ if (!isset($_SESSION['user_role'])) {
 }
 $user_role = $_SESSION['user_role'];
 
-if (!in_array($user_role, ['super_admin', 'administrador'])) {
+// Get user permissions from rank
+$user_permissions = [];
+try {
+    $stmt = $pdo->prepare("SELECT permissions FROM user_ranks WHERE rank_name = ?");
+    $stmt->execute([$user_role]);
+    $rank_permissions = $stmt->fetchColumn();
+    if ($rank_permissions) {
+        $user_permissions = json_decode($rank_permissions, true) ?: [];
+    }
+} catch (Exception $e) {
+    $user_permissions = [];
+}
+
+// Check if user has manage_config permission or is super_admin
+$has_config_permission = ($user_role === 'super_admin') || in_array('manage_config', $user_permissions);
+
+if (!$has_config_permission) {
     header('Location: dashboard.php?error=access_denied');
     exit();
 }

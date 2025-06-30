@@ -20,8 +20,23 @@ if (!isset($_SESSION['user_role'])) {
 }
 $user_role = $_SESSION['user_role'];
 
-// Check if user has administrator or creator privileges
-if (!in_array($user_role, ['administrador', 'super_admin'])) {
+// Get user permissions from rank
+$user_permissions = [];
+try {
+    $stmt = $pdo->prepare("SELECT permissions FROM user_ranks WHERE rank_name = ?");
+    $stmt->execute([$user_role]);
+    $rank_permissions = $stmt->fetchColumn();
+    if ($rank_permissions) {
+        $user_permissions = json_decode($rank_permissions, true) ?: [];
+    }
+} catch (Exception $e) {
+    $user_permissions = [];
+}
+
+// Check if user has manage_users permission or is super_admin
+$has_payment_permission = ($user_role === 'super_admin') || in_array('manage_users', $user_permissions);
+
+if (!$has_payment_permission) {
     header('Location: dashboard.php?access_denied=1');
     exit;
 }
