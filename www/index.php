@@ -15,14 +15,13 @@ if ($_POST['action'] === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? '';
     
     if (!empty($username) && !empty($password)) {
-        $stmt = $pdo->prepare("SELECT id, username, email, password FROM users WHERE username = ?");
+        $stmt = $pdo->prepare("SELECT id, username, password FROM users WHERE habbo_username = ?");
         $stmt->execute([$username]);
         $user = $stmt->fetch();
         
         if ($user && password_verify($password, $user['password'])) {
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];
-            $_SESSION['email'] = $user['email'];
             header('Location: dashboard.php');
             exit();
         } else {
@@ -34,43 +33,72 @@ if ($_POST['action'] === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Handle register form submission
-if ($_POST['action'] === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (isset($_POST['action']) && $_POST['action'] === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     include 'config/database.php';
     
-    $username = $_POST['username'] ?? '';
-    $email = $_POST['email'] ?? '';
+    $habbo_username = trim($_POST['habbo_username'] ?? '');
     $password = $_POST['password'] ?? '';
     $confirmPassword = $_POST['confirmPassword'] ?? '';
+    $verification_code = trim($_POST['verification_code'] ?? '');
+    $habbo_verified = $_POST['habbo_verified'] ?? '';
     
-    if (!empty($username) && !empty($email) && !empty($password) && !empty($confirmPassword)) {
-        if ($password === $confirmPassword) {
+    // Debug information
+    error_log("Registration attempt - Data received: " . json_encode([
+        'habbo_username' => $habbo_username,
+        'verification_code' => $verification_code,
+        'habbo_verified' => $habbo_verified,
+        'password_length' => strlen($password),
+        'confirmPassword_length' => strlen($confirmPassword)
+    ]));
+    
+    // Validate all required fields
+    if (empty($habbo_username)) {
+        $register_error = "El campo nombre de Habbo es requerido";
+    } elseif (empty($password)) {
+        $register_error = "El campo contraseña es requerido";
+    } elseif (empty($confirmPassword)) {
+        $register_error = "El campo confirmar contraseña es requerido";
+    } elseif ($password !== $confirmPassword) {
+        $register_error = "Las contraseñas no coinciden";
+    } elseif ($habbo_verified !== 'true') {
+        $register_error = "Debes verificar tu cuenta de Habbo antes de continuar";
+    } elseif (empty($verification_code)) {
+        $register_error = "Código de verificación no válido";
+    } else {
+        try {
             // Check if user already exists
-            $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-            $stmt->execute([$username, $email]);
+            $stmt = $pdo->prepare("SELECT id FROM users WHERE habbo_username = ?");
+            $stmt->execute([$habbo_username]);
             
             if ($stmt->fetch()) {
-                $register_error = "El usuario o email ya existe";
+                $register_error = "Este nombre de Habbo ya está registrado";
             } else {
                 // Create new user
                 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("INSERT INTO users (username, email, password, created_at) VALUES (?, ?, ?, NOW())");
+                $stmt = $pdo->prepare("INSERT INTO users (username, password, habbo_username, created_at) VALUES (?, ?, ?, NOW())");
                 
-                if ($stmt->execute([$username, $email, $hashedPassword])) {
+                if ($stmt->execute([$habbo_username, $hashedPassword, $habbo_username])) {
                     $user_id = $pdo->lastInsertId();
+                    
+                    // Log successful registration
+                    error_log("User registered successfully with ID: " . $user_id);
+                    
+                    // Auto login after successful registration
                     $_SESSION['user_id'] = $user_id;
-                    $_SESSION['username'] = $username;
-                    $_SESSION['email'] = $email;
+                    $_SESSION['username'] = $habbo_username;
+                    
+                    // Redirect to dashboard
                     header('Location: dashboard.php');
                     exit();
                 } else {
-                    $register_error = "Error al crear la cuenta";
+                    $register_error = "Error al crear la cuenta en la base de datos";
+                    error_log("Database error during user creation: " . json_encode($stmt->errorInfo()));
                 }
             }
-        } else {
-            $register_error = "Las contraseñas no coinciden";
+        } catch (Exception $e) {
+            $register_error = "Error del sistema: " . $e->getMessage();
+            error_log("Exception during registration: " . $e->getMessage());
         }
-    } else {
-        $register_error = "Por favor completa todos los campos";
     }
 }
 ?>
@@ -157,8 +185,8 @@ if ($_POST['action'] === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 <input type="hidden" name="action" value="login">
                 
                 <div class="form-group">
-                    <label>Usuario</label>
-                    <input type="text" name="username" placeholder="Ingresa tu usuario" class="glass-input" required>
+                    <label>Nombre de Habbo</label>
+                    <input type="text" name="username" placeholder="Tu nombre de Habbo" class="glass-input" required>
                 </div>
                 
                 <div class="form-group">
@@ -192,17 +220,42 @@ if ($_POST['action'] === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="error-message"><?php echo htmlspecialchars($register_error); ?></div>
             <?php endif; ?>
             
-            <form method="POST" class="auth-form">
+            <form method="POST" class="auth-form" id="registerForm">
                 <input type="hidden" name="action" value="register">
+                <input type="hidden" name="verification_code" id="verification_code">
+                <input type="hidden" name="habbo_verified" id="habbo_verified" value="false">
                 
                 <div class="form-group">
-                    <label>Usuario</label>
-                    <input type="text" name="username" placeholder="Elige tu usuario" class="glass-input" required>
+                    <label>Nombre de usuario en Habbo</label>
+                    <input type="text" name="habbo_username" id="habbo_username" placeholder="Tu nombre en Habbo" class="glass-input" required>
                 </div>
                 
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" name="email" placeholder="tu@email.com" class="glass-input" required>
+                <div id="verification_step" class="verification-step" style="display: none;">
+                    <div class="verification-info">
+                        <h4><i class="fas fa-shield-alt"></i> Verificación de Habbo</h4>
+                        <p>Coloca este código en tu misión de Habbo:</p>
+                        <div class="verification-code" id="display_code"></div>
+                        <p class="verification-instructions">
+                            1. Ve a tu perfil de Habbo<br>
+                            2. Edita tu misión<br>
+                            3. Coloca exactamente el código mostrado<br>
+                            4. Haz clic en "Verificar misión"
+                        </p>
+                        <div class="verification-timer">
+                            Código válido por: <span id="timer">10:00</span>
+                        </div>
+                    </div>
+                    
+                    <div class="button-center">
+                        <button type="button" class="glass-button" id="verify_mission_btn">
+                            <i class="fas fa-check-circle"></i>
+                            Verificar misión
+                        </button>
+                        <button type="button" class="glass-button" id="generate_new_code_btn">
+                            <i class="fas fa-redo"></i>
+                            Nuevo código
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -216,7 +269,11 @@ if ($_POST['action'] === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 
                 <div class="button-center">
-                    <button type="submit" class="glass-button submit-btn">
+                    <button type="button" class="glass-button" id="start_verification_btn">
+                        <i class="fas fa-user-shield"></i>
+                        Verificar Habbo
+                    </button>
+                    <button type="submit" class="glass-button submit-btn" id="final_register_btn" style="display: none;">
                         <i class="fas fa-user-plus"></i>
                         Crear Cuenta
                     </button>

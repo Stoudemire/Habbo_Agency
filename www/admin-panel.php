@@ -44,14 +44,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     switch ($_POST['action']) {
         case 'create_user':
-            $username = $_POST['username'];
-            $email = $_POST['email'];
+            $habbo_username = $_POST['habbo_username'];
             $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
             $role = $_POST['role'];
             
             try {
-                $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
-                $success = $stmt->execute([$username, $email, $password, $role]);
+                $stmt = $pdo->prepare("INSERT INTO users (username, password, role, habbo_username) VALUES (?, ?, ?, ?)");
+                $success = $stmt->execute([$habbo_username, $password, $role, $habbo_username]);
                 echo json_encode(['success' => $success, 'message' => $success ? 'Usuario creado correctamente' : 'Error al crear usuario']);
             } catch (PDOException $e) {
                 echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
@@ -304,8 +303,7 @@ $current_user = $_SESSION['username'];
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Usuario</th>
-                            <th>Email</th>
+                            <th>Nombre de Habbo</th>
                             <th>Rol</th>
                             <th>Creado</th>
                             <th>Acciones</th>
@@ -322,13 +320,12 @@ $current_user = $_SESSION['username'];
                                              style="width: 30px; height: 30px; border-radius: 50%; object-fit: cover;">
                                     <?php else: ?>
                                         <div style="width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, rgb(60, 30, 80), rgb(40, 60, 30)); display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold;">
-                                            <?php echo strtoupper(substr($user['username'], 0, 1)); ?>
+                                            <?php echo strtoupper(substr($user['habbo_username'], 0, 1)); ?>
                                         </div>
                                     <?php endif; ?>
-                                    <?php echo htmlspecialchars($user['username']); ?>
+                                    <?php echo htmlspecialchars($user['habbo_username']); ?>
                                 </div>
                             </td>
-                            <td><?php echo htmlspecialchars($user['email']); ?></td>
                             <td>
                                 <span class="role-badge role-<?php echo $user['role']; ?>">
                                     <?php echo ucfirst($user['role']); ?>

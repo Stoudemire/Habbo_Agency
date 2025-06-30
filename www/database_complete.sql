@@ -8,10 +8,10 @@ USE habbo_agency;
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role ENUM('super_admin', 'administrador', 'operador', 'usuario') DEFAULT 'usuario',
-    profile_photo VARCHAR(255),
+    habbo_username VARCHAR(50) NOT NULL UNIQUE,
+    profile_image VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS time_sessions (
     INDEX idx_user_id (user_id),
     INDEX idx_status (status)
 );
+
+-- Insertar configuración inicial del sistema
+INSERT INTO system_config (config_key, config_value) VALUES 
+('site_title', 'Habbo Agency'),
+('company_logo', '') 
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+
+-- Crear usuario administrador por defecto (contraseña: admin123)
+INSERT INTO users (username, password, role, habbo_username) VALUES 
+('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'super_admin', 'AdminHabbo')
+ON DUPLICATE KEY UPDATE role = VALUES(role);
 
 -- Tabla de rangos de usuario
 CREATE TABLE IF NOT EXISTS user_ranks (
@@ -99,11 +110,11 @@ INSERT IGNORE INTO user_ranks (rank_name, display_name, level, permissions) VALU
 ('usuario', 'Usuario', 1, '[]');
 
 -- Insertar usuarios por defecto (password: admin123)
-INSERT IGNORE INTO users (username, email, password, role) VALUES
-('creator', 'creator@agency.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'super_admin'),
-('admin', 'admin@agency.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'administrador'),
-('operador1', 'operador@agency.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'operador'),
-('usuario1', 'usuario@agency.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'usuario');
+INSERT IGNORE INTO users (username, password, role, habbo_username) VALUES
+('creator', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'super_admin', 'Creator'),
+('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'administrador', 'AdminHabbo'),
+('operador1', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'operador', 'OperadorHabbo'),
+('usuario1', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'usuario', 'UsuarioHabbo');
 
 -- Tabla de días especiales (para la página de horarios)
 CREATE TABLE IF NOT EXISTS special_days (
