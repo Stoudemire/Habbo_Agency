@@ -40,162 +40,196 @@ $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key =
 $stmt->execute();
 $site_title = $stmt->fetchColumn() ?: 'Habbo Agency';
 
-// Handle promotion action
-$success_message = '';
-$error_message = '';
-
-// Check for session messages (from POST-redirect-GET pattern)
-if (isset($_SESSION['promotion_success'])) {
-    $success_message = $_SESSION['promotion_success'];
-    unset($_SESSION['promotion_success']);
+// Handle AJAX requests for getting fresh history data
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_history') {
+    header('Content-Type: application/json');
+    
+    try {
+        $stmt = $pdo->prepare("
+            SELECT pl.*, 
+                   promoted.habbo_username as promoted_username,
+                   promoted.id as promoted_user_id,
+                   promoter.habbo_username as promoter_username
+            FROM promotion_log pl
+            LEFT JOIN users promoted ON pl.promoted_user_id = promoted.id
+            LEFT JOIN users promoter ON pl.promoted_by_user_id = promoter.id
+            ORDER BY pl.created_at DESC
+            LIMIT 50
+        ");
+        $stmt->execute();
+        $history_data = $stmt->fetchAll();
+        
+        echo json_encode(['success' => true, 'history' => $history_data]);
+        exit();
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+        exit();
+    }
 }
 
-if (isset($_SESSION['promotion_error'])) {
-    $error_message = $_SESSION['promotion_error'];
-    unset($_SESSION['promotion_error']);
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'promote_user') {
-        $target_user_id = intval($_POST['user_id']);
-        $new_role = trim($_POST['new_role']);
-        $promotion_reason = trim($_POST['reason']);
-
-        // Validate the new role
-        $valid_roles = ['usuario', 'operador', 'administrador'];
+// Handle AJAX requests for getting fresh user data
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_users') {
+    header('Content-Type: application/json');
+    
+    try {
         if ($user_role === 'super_admin') {
-            $valid_roles[] = 'super_admin';
-        }
-
-        if (!in_array($new_role, $valid_roles)) {
-            $_SESSION['promotion_error'] = "Rol no válido seleccionado.";
-            header('Location: promotions.php');
-            exit();
+            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username");
+            $stmt->execute([$_SESSION['user_id']]);
         } else {
+            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username");
+            $stmt->execute([$_SESSION['user_id']]);
+        }
+        $users_data = $stmt->fetchAll();
+        
+        echo json_encode(['success' => true, 'users' => $users_data]);
+        exit();
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+        exit();
+    }
+}
+
+// Handle promotion action
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    // Always return JSON for AJAX requests
+    header('Content-Type: application/json');
+    
+    if ($_POST['action'] === 'promote_user') {
+        try {
+            $target_user_id = intval($_POST['user_id']);
+            $new_role = trim($_POST['new_role']);
+            $promotion_reason = trim($_POST['reason'] ?? '');
+            $reason_type = $_POST['reason_type'] ?? 'manual';
+
+            // Auto-generate reason if automatic
+            if ($reason_type === 'automatic') {
+                $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
+                $target_stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+                $target_stmt->execute([$target_user_id]);
+                $current_role = $target_stmt->fetchColumn();
+                
+                $current_level = $role_hierarchy[$current_role] ?? 0;
+                $new_level = $role_hierarchy[$new_role] ?? 0;
+                
+                if ($new_level > $current_level) {
+                    $promotion_reason = "Ascenso por buen desempeño y cumplimiento de responsabilidades";
+                } else {
+                    $promotion_reason = "Degradación de rango por decisión administrativa";
+                }
+            }
+
+            // Validate the new role
+            $valid_roles = ['usuario', 'operador', 'administrador'];
+            if ($user_role === 'super_admin') {
+                $valid_roles[] = 'super_admin';
+            }
+
+            if (!in_array($new_role, $valid_roles)) {
+                echo json_encode(['success' => false, 'message' => 'Rol no válido seleccionado.']);
+                exit();
+            }
+
             // Get target user info
             $stmt = $pdo->prepare("SELECT id, habbo_username, role FROM users WHERE id = ?");
             $stmt->execute([$target_user_id]);
             $target_user = $stmt->fetch();
 
             if (!$target_user) {
-                $_SESSION['promotion_error'] = "Usuario no encontrado.";
-                header('Location: promotions.php');
+                echo json_encode(['success' => false, 'message' => 'Usuario no encontrado.']);
                 exit();
-            } elseif ($target_user['id'] == $_SESSION['user_id']) {
-                $_SESSION['promotion_error'] = "No puedes ascenderte a ti mismo.";
-                header('Location: promotions.php');
-                exit();
-            } elseif ($target_user['role'] === $new_role) {
-                $_SESSION['promotion_error'] = "El usuario ya tiene ese rol.";
-                header('Location: promotions.php');
-                exit();
-            } else {
-                // Check permission hierarchy
-                $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
-                $current_user_level = $role_hierarchy[$user_role] ?? 0;
-                $target_current_level = $role_hierarchy[$target_user['role']] ?? 0;
-                $new_role_level = $role_hierarchy[$new_role] ?? 0;
-
-                if ($current_user_level <= $target_current_level && $user_role !== 'super_admin') {
-                    $_SESSION['promotion_error'] = "No tienes permisos para ascender a este usuario.";
-                    header('Location: promotions.php');
-                    exit();
-                } elseif ($new_role_level >= $current_user_level && $user_role !== 'super_admin') {
-                    $_SESSION['promotion_error'] = "No puedes ascender a un usuario a un rol igual o superior al tuyo.";
-                    header('Location: promotions.php');
-                    exit();
-                } else {
-                    try {
-                        $pdo->beginTransaction();
-
-                        // Update user role
-                        $stmt = $pdo->prepare("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-                        $update_success = $stmt->execute([$new_role, $target_user_id]);
-
-                        if ($update_success) {
-                            // Log the promotion
-                            $log_stmt = $pdo->prepare("INSERT INTO promotion_log (promoted_user_id, promoted_by_user_id, old_role, new_role, reason, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
-                            
-                            // Create promotion_log table if it doesn't exist
-                            try {
-                                $create_table = $pdo->exec("
-                                    CREATE TABLE IF NOT EXISTS promotion_log (
-                                        id INT AUTO_INCREMENT PRIMARY KEY,
-                                        promoted_user_id INT NOT NULL,
-                                        promoted_by_user_id INT NOT NULL,
-                                        old_role VARCHAR(50) NOT NULL,
-                                        new_role VARCHAR(50) NOT NULL,
-                                        reason TEXT,
-                                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                        FOREIGN KEY (promoted_user_id) REFERENCES users(id) ON DELETE CASCADE,
-                                        FOREIGN KEY (promoted_by_user_id) REFERENCES users(id) ON DELETE CASCADE
-                                    )
-                                ");
-                            } catch (Exception $e) {
-                                // Table might already exist, continue
-                            }
-
-                            $log_stmt->execute([
-                                $target_user_id,
-                                $_SESSION['user_id'],
-                                $target_user['role'],
-                                $new_role,
-                                $promotion_reason
-                            ]);
-
-                            // Invalidate the promoted user's session for immediate role update
-                            try {
-                                // Ensure session_invalidations table exists
-                                $pdo->exec("
-                                    CREATE TABLE IF NOT EXISTS session_invalidations (
-                                        user_id INT PRIMARY KEY,
-                                        invalidated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                                    )
-                                ");
-                                
-                                // Mark user session for invalidation
-                                $stmt_invalidate = $pdo->prepare("INSERT INTO session_invalidations (user_id) VALUES (?) ON DUPLICATE KEY UPDATE invalidated_at = CURRENT_TIMESTAMP");
-                                $stmt_invalidate->execute([$target_user_id]);
-                                
-                                // Also clear any cached user data in PHP sessions
-                                if (session_id()) {
-                                    // If we can access the session storage, clear user data for this user
-                                    $session_path = session_save_path() ?: sys_get_temp_dir();
-                                    if (is_dir($session_path)) {
-                                        $files = glob($session_path . '/sess_*');
-                                        foreach ($files as $file) {
-                                            $content = file_get_contents($file);
-                                            if (strpos($content, '"user_id";i:' . $target_user_id . ';') !== false) {
-                                                // Remove the session file to force re-login
-                                                @unlink($file);
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (Exception $e) {
-                                // Session invalidation failed, but promotion was successful
-                                error_log("Session invalidation error: " . $e->getMessage());
-                            }
-
-                            $pdo->commit();
-                            
-                            // Use session to pass success message and redirect to avoid POST resubmission
-                            $_SESSION['promotion_success'] = "Usuario '{$target_user['habbo_username']}' ascendido exitosamente de '{$target_user['role']}' a '{$new_role}'. Los cambios se aplicarán inmediatamente.";
-                            header('Location: promotions.php');
-                            exit();
-                        } else {
-                            $pdo->rollBack();
-                            $error_message = "Error al actualizar el rol del usuario.";
-                        }
-                    } catch (Exception $e) {
-                        $pdo->rollBack();
-                        $_SESSION['promotion_error'] = "Error de base de datos: " . $e->getMessage();
-                        header('Location: promotions.php');
-                        exit();
-                    }
-                }
             }
+
+            if ($target_user['id'] == $_SESSION['user_id']) {
+                echo json_encode(['success' => false, 'message' => 'No puedes modificar tu propio rango.']);
+                exit();
+            }
+
+            if ($target_user['role'] === $new_role) {
+                echo json_encode(['success' => false, 'message' => 'El usuario ya tiene ese rol.']);
+                exit();
+            }
+
+            // Check permission hierarchy
+            $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
+            $current_user_level = $role_hierarchy[$user_role] ?? 0;
+            $target_current_level = $role_hierarchy[$target_user['role']] ?? 0;
+            $new_role_level = $role_hierarchy[$new_role] ?? 0;
+
+            if ($current_user_level <= $target_current_level && $user_role !== 'super_admin') {
+                echo json_encode(['success' => false, 'message' => 'No tienes permisos para modificar a este usuario.']);
+                exit();
+            }
+
+            if ($new_role_level >= $current_user_level && $user_role !== 'super_admin') {
+                echo json_encode(['success' => false, 'message' => 'No puedes asignar un rol igual o superior al tuyo.']);
+                exit();
+            }
+
+            // Create promotion_log table if it doesn't exist (outside transaction)
+            try {
+                $pdo->exec("
+                    CREATE TABLE IF NOT EXISTS promotion_log (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        promoted_user_id INT NOT NULL,
+                        promoted_by_user_id INT NOT NULL,
+                        old_role VARCHAR(50) NOT NULL,
+                        new_role VARCHAR(50) NOT NULL,
+                        reason TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (promoted_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                        FOREIGN KEY (promoted_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                ");
+            } catch (Exception $e) {
+                // Table might already exist, continue
+            }
+
+            // Start transaction for the actual operations
+            $pdo->beginTransaction();
+
+            // Update user role
+            $stmt = $pdo->prepare("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            $update_success = $stmt->execute([$new_role, $target_user_id]);
+
+            if (!$update_success) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => 'Error al actualizar el rol del usuario.']);
+                exit();
+            }
+
+            // Log the promotion
+            $log_stmt = $pdo->prepare("INSERT INTO promotion_log (promoted_user_id, promoted_by_user_id, old_role, new_role, reason, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+            $log_success = $log_stmt->execute([
+                $target_user_id,
+                $_SESSION['user_id'],
+                $target_user['role'],
+                $new_role,
+                $promotion_reason
+            ]);
+
+            if (!$log_success) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => 'Error al registrar el cambio en el historial.']);
+                exit();
+            }
+
+            $pdo->commit();
+            
+            echo json_encode([
+                'success' => true,
+                'message' => "Usuario '{$target_user['habbo_username']}' modificado exitosamente de '{$target_user['role']}' a '{$new_role}'.",
+                'user_id' => $target_user_id,
+                'new_role' => $new_role,
+                'username' => $target_user['habbo_username']
+            ]);
+            exit();
+
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            echo json_encode(['success' => false, 'message' => 'Error al procesar la solicitud: ' . $e->getMessage()]);
+            exit();
         }
     }
 }
@@ -220,7 +254,7 @@ try {
         LEFT JOIN users promoted ON pl.promoted_user_id = promoted.id
         LEFT JOIN users promoter ON pl.promoted_by_user_id = promoter.id
         ORDER BY pl.created_at DESC
-        LIMIT 10
+        LIMIT 50
     ");
     $stmt->execute();
     $recent_promotions = $stmt->fetchAll();
@@ -234,77 +268,108 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Ascensos - <?php echo htmlspecialchars($site_title); ?></title>
+    <title>Gestión de Ascensos - <?php echo htmlspecialchars($site_title); ?></title>
     <link rel="stylesheet" href="assets/css/styles.css">
     <link rel="stylesheet" href="assets/css/notifications.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .promotion-card {
+        .promotions-container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 25px;
+            height: calc(100vh - 200px);
+        }
+
+        .main-table-section {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .search-container {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 25px;
-        }
-
-        .user-select-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-
-        .user-card {
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
             padding: 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
+            margin-bottom: 20px;
         }
 
-        .user-card:hover {
-            border-color: rgba(156, 39, 176, 0.6);
-            background: rgba(255, 255, 255, 0.15);
-            transform: translateY(-2px);
+        .search-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 12px 20px 12px 45px;
+            color: #ffffff;
+            font-size: 16px;
         }
 
-        .user-card.selected {
-            border-color: #9c27b0;
-            background: rgba(156, 39, 176, 0.2);
+        .search-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
         }
 
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
+        .search-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.6);
         }
 
-        .user-avatar {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #9c27b0, #673ab7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1.5em;
-            font-weight: bold;
-        }
-
-        .user-details h4 {
-            color: white;
-            margin: 0 0 5px 0;
-            font-size: 1.2em;
-        }
-
-        .user-role {
-            padding: 4px 12px;
+        .users-table-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 15px;
-            font-size: 0.9em;
+            overflow: hidden;
+            height: 440px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .table-header {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            flex-shrink: 0;
+        }
+
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            color: #ffffff;
+        }
+
+        .table-scroll {
+            flex: 1;
+            overflow-y: auto;
+            height: 360px;
+        }
+
+        .users-table th {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #ffffff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            height: 50px;
+        }
+
+        .users-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            height: 70px;
+        }
+
+        .users-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .user-role-badge {
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 0.8em;
             font-weight: bold;
             text-transform: uppercase;
         }
@@ -314,98 +379,285 @@ try {
         .role-administrador { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
         .role-super_admin { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
 
-        .promotion-form {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 25px;
-            margin-top: 20px;
-            display: none;
-        }
-
-        .promotion-form.active {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .role-selector {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 12px;
-            margin: 15px 0;
-        }
-
-        .role-option {
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            padding: 15px;
+        .action-btn {
+            background: linear-gradient(45deg, #9c27b0, #673ab7);
+            border: none;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 8px;
             cursor: pointer;
-            text-align: center;
+            font-size: 14px;
             transition: all 0.3s ease;
-            color: white;
         }
 
-        .role-option:hover {
-            border-color: rgba(156, 39, 176, 0.6);
-            background: rgba(255, 255, 255, 0.15);
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(156, 39, 176, 0.4);
         }
 
-        .role-option.selected {
-            border-color: #9c27b0;
-            background: rgba(156, 39, 176, 0.3);
+        .history-section {
+            display: flex;
+            flex-direction: column;
         }
 
-        .role-option.disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        .promotions-log {
+        .history-container {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 15px;
-            padding: 25px;
-            margin-top: 30px;
+            padding: 20px;
+            height: 440px;
+            display: flex;
+            flex-direction: column;
         }
 
-        .log-entry {
+        .history-scroll {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 15px;
+            height: 300px;
+        }
+
+        .history-item {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
             border-left: 4px solid #9c27b0;
+            min-height: 50px;
         }
 
-        .log-entry:last-child {
-            margin-bottom: 0;
-        }
-
-        .alert {
-            padding: 15px 20px;
-            margin: 20px 0;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
+        .history-search {
+            background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            padding: 10px;
+            color: #ffffff;
+            width: 100%;
+            margin-bottom: 15px;
         }
 
-        .alert-success {
-            background: rgba(34, 197, 94, 0.2);
-            color: #ffffff;
-            border-color: rgba(34, 197, 94, 0.4);
+        .history-search::placeholder {
+            color: rgba(255, 255, 255, 0.6);
         }
 
-        .alert-error {
-            background: rgba(239, 68, 68, 0.2);
+        /* Modal Styles */
+        .promotion-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(25px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        .modal-title {
             color: #ffffff;
-            border-color: rgba(239, 68, 68, 0.4);
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .close-modal:hover {
+            color: #ffffff;
+        }
+
+        .role-selection {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .role-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s ease;
+            color: #ffffff;
+        }
+
+        .role-card:hover {
+            border-color: rgba(156, 39, 176, 0.6);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .role-card.selected {
+            border-color: #9c27b0;
+            background: rgba(156, 39, 176, 0.3);
+        }
+
+        .role-card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .reason-type-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .reason-type-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 15px;
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .reason-type-btn.active {
+            border-color: #9c27b0;
+            background: rgba(156, 39, 176, 0.3);
+        }
+
+        .manual-reason {
+            display: none;
+            margin-top: 15px;
+        }
+
+        .manual-reason.show {
+            display: block;
+        }
+
+        .submit-promotion {
+            background: linear-gradient(45deg, #9c27b0, #673ab7);
+            border: none;
+            color: #ffffff;
+            padding: 12px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        /* Custom Glass-morphism Scrollbars */
+        .table-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .table-scroll::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            backdrop-filter: blur(5px);
+        }
+
+        .table-scroll::-webkit-scrollbar-thumb {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.6), 
+                rgba(156, 39, 176, 0.8));
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .table-scroll::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.8), 
+                rgba(156, 39, 176, 1));
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .table-scroll::-webkit-scrollbar-thumb:active {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 1), 
+                rgba(120, 30, 140, 1));
+        }
+
+        /* History scroll custom scrollbar */
+        .history-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .history-scroll::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            backdrop-filter: blur(5px);
+        }
+
+        .history-scroll::-webkit-scrollbar-thumb {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.6), 
+                rgba(156, 39, 176, 0.8));
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .history-scroll::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.8), 
+                rgba(156, 39, 176, 1));
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .history-scroll::-webkit-scrollbar-thumb:active {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 1), 
+                rgba(120, 30, 140, 1));
+        }
+
+        @media (max-width: 1024px) {
+            .promotions-container {
+                grid-template-columns: 1fr;
+                height: auto;
+                gap: 20px;
+            }
+            
+            .users-table-container {
+                height: 380px;
+            }
+            
+            .table-scroll {
+                height: 300px;
+            }
+            
+            .history-container {
+                height: 380px;
+            }
+            
+            .history-scroll {
+                height: 280px;
+            }
         }
     </style>
 </head>
@@ -415,8 +667,8 @@ try {
         <div class="dashboard-header">
             <div class="header-content">
                 <h1 class="dashboard-title">
-                    <i class="fas fa-level-up-alt"></i>
-                    Sistema de Ascensos
+                    <i class="fas fa-users-cog"></i>
+                    Gestión de Ascensos y Degradaciones
                 </h1>
                 <div class="header-actions">
                     <a href="dashboard.php" class="back-btn">
@@ -428,247 +680,572 @@ try {
         </div>
 
         <div class="dashboard-content">
-            <?php if ($success_message): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i>
-                    <?php echo htmlspecialchars($success_message); ?>
+            <div class="promotions-container">
+                <!-- Main Table Section -->
+                <div class="main-table-section">
+                    <!-- Search -->
+                    <div class="search-container">
+                        <div style="position: relative;">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" id="userSearch" class="search-input" placeholder="Buscar usuario por nombre...">
+                        </div>
+                    </div>
+
+                    <!-- Users Table -->
+                    <div class="users-table-container">
+                        <div class="table-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-users"></i>
+                                Lista de Usuarios
+                            </h3>
+                        </div>
+                        <div class="table-scroll">
+                            <table class="users-table">
+                                <thead>
+                                    <tr>
+                                        <th>Usuario</th>
+                                        <th>Rol Actual</th>
+                                        <th>Fecha de Registro</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="usersTableBody">
+                                    <?php foreach ($promotable_users as $promotable_user): ?>
+                                        <tr data-user-id="<?php echo $promotable_user['id']; ?>" data-username="<?php echo htmlspecialchars($promotable_user['habbo_username']); ?>">
+                                            <td>
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotable_user['habbo_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                                         alt="Avatar de <?php echo htmlspecialchars($promotable_user['habbo_username']); ?>"
+                                                         style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
+                                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                    <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                                        <?php echo strtoupper(substr($promotable_user['habbo_username'], 0, 1)); ?>
+                                                    </div>
+                                                    <div>
+                                                        <div style="color: #ffffff; font-weight: 500;">
+                                                            <?php echo htmlspecialchars($promotable_user['habbo_username']); ?>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="user-role-badge role-<?php echo $promotable_user['role']; ?>">
+                                                    <?php echo ucfirst($promotable_user['role']); ?>
+                                                </span>
+                                            </td>
+                                            <td style="color: rgba(255,255,255,0.8);">
+                                                <?php echo date('d/m/Y', strtotime($promotable_user['created_at'])); ?>
+                                            </td>
+                                            <td>
+                                                <button class="action-btn" onclick="openPromotionModal(<?php echo $promotable_user['id']; ?>, '<?php echo htmlspecialchars($promotable_user['habbo_username']); ?>', '<?php echo $promotable_user['role']; ?>')">
+                                                    <i class="fas fa-edit"></i>
+                                                    Gestionar
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-            <?php endif; ?>
 
-            <?php if ($error_message): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <?php echo htmlspecialchars($error_message); ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- Promotion System -->
-            <div class="promotion-card">
-                <h3 class="card-title">
-                    <i class="fas fa-user-plus"></i>
-                    Ascender Usuario
-                </h3>
-                <p style="color: rgba(255,255,255,0.8); margin-bottom: 20px;">
-                    Selecciona un usuario para ascenderlo a un nuevo rango. Solo puedes ascender usuarios a rangos inferiores al tuyo.
-                </p>
-
-                <!-- User Selection -->
-                <div class="form-group">
-                    <label style="color: white; font-weight: bold; margin-bottom: 15px; display: block;">
-                        <i class="fas fa-users"></i>
-                        Seleccionar Usuario:
-                    </label>
-                    <div class="user-select-grid">
-                        <?php foreach ($promotable_users as $promotable_user): ?>
-                            <div class="user-card" onclick="selectUser(<?php echo $promotable_user['id']; ?>, '<?php echo htmlspecialchars($promotable_user['habbo_username']); ?>', '<?php echo $promotable_user['role']; ?>')">
-                                <div class="user-info">
-                                    <div class="user-avatar">
-                                        <?php echo strtoupper(substr($promotable_user['habbo_username'], 0, 1)); ?>
+                <!-- History Section -->
+                <div class="history-section">
+                    <div class="history-container">
+                        <h3 class="card-title">
+                            <i class="fas fa-history"></i>
+                            Historial de Cambios
+                        </h3>
+                        <input type="text" id="historySearch" class="history-search" placeholder="Buscar en historial...">
+                        
+                        <div class="history-scroll" id="historyContainer">
+                            <?php foreach ($recent_promotions as $promotion): ?>
+                                <div class="history-item" data-username="<?php echo htmlspecialchars($promotion['promoted_username'] ?? ''); ?>" data-promoter="<?php echo htmlspecialchars($promotion['promoter_username'] ?? ''); ?>" data-reason="<?php echo htmlspecialchars($promotion['reason'] ?? ''); ?>">
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                                        <div style="display: flex; align-items: center; gap: 10px;">
+                                            <?php if ($promotion['promoted_username']): ?>
+                                                <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotion['promoted_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                                     alt="Avatar de <?php echo htmlspecialchars($promotion['promoted_username']); ?>"
+                                                     style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
+                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                                    <?php echo strtoupper(substr($promotion['promoted_username'], 0, 1)); ?>
+                                                </div>
+                                            <?php endif; ?>
+                                            <strong style="color: #ffffff;">
+                                                <?php echo htmlspecialchars($promotion['promoted_username'] ?? 'Usuario eliminado'); ?>
+                                            </strong>
+                                        </div>
+                                        <small style="color: rgba(255,255,255,0.6);">
+                                            <?php echo date('d/m/Y H:i', strtotime($promotion['created_at'])); ?>
+                                        </small>
                                     </div>
-                                    <div class="user-details">
-                                        <h4><?php echo htmlspecialchars($promotable_user['habbo_username']); ?></h4>
-                                        <span class="user-role role-<?php echo $promotable_user['role']; ?>">
-                                            <?php echo ucfirst($promotable_user['role']); ?>
+                                    <div style="color: rgba(255,255,255,0.9); margin-bottom: 5px;">
+                                        <span class="user-role-badge role-<?php echo $promotion['old_role']; ?>" style="font-size: 0.7em;">
+                                            <?php echo ucfirst($promotion['old_role']); ?>
+                                        </span>
+                                        <i class="fas fa-arrow-right" style="margin: 0 8px; color: rgba(255,255,255,0.6);"></i>
+                                        <span class="user-role-badge role-<?php echo $promotion['new_role']; ?>" style="font-size: 0.7em;">
+                                            <?php echo ucfirst($promotion['new_role']); ?>
                                         </span>
                                     </div>
+                                    <small style="color: rgba(255,255,255,0.7);">
+                                        Por: <?php echo htmlspecialchars($promotion['promoter_username'] ?? 'Usuario eliminado'); ?>
+                                    </small>
+                                    <?php if ($promotion['reason']): ?>
+                                        <div style="margin-top: 8px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                            <small style="color: rgba(255,255,255,0.8); font-style: italic;">
+                                                "<?php echo htmlspecialchars($promotion['reason']); ?>"
+                                            </small>
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
-                            </div>
-                        <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </div>
-
-                <!-- Promotion Form -->
-                <form method="POST" class="promotion-form" id="promotionForm">
-                    <input type="hidden" name="action" value="promote_user">
-                    <input type="hidden" name="user_id" id="selectedUserId" value="">
-
-                    <h4 style="color: white; margin-bottom: 15px;">
-                        <i class="fas fa-crown"></i>
-                        Ascender a: <span id="selectedUserName"></span>
-                    </h4>
-
-                    <div class="form-group">
-                        <label style="color: white; font-weight: bold; margin-bottom: 10px; display: block;">Nuevo Rol:</label>
-                        <div class="role-selector">
-                            <div class="role-option" onclick="selectRole('usuario')" data-role="usuario">
-                                <i class="fas fa-user"></i><br>
-                                <strong>Usuario</strong><br>
-                                <small>Acceso básico</small>
-                            </div>
-                            <div class="role-option" onclick="selectRole('operador')" data-role="operador">
-                                <i class="fas fa-cog"></i><br>
-                                <strong>Operador</strong><br>
-                                <small>Gestión de tiempos</small>
-                            </div>
-                            <div class="role-option" onclick="selectRole('administrador')" data-role="administrador">
-                                <i class="fas fa-shield-alt"></i><br>
-                                <strong>Administrador</strong><br>
-                                <small>Gestión completa</small>
-                            </div>
-                            <?php if ($user_role === 'super_admin'): ?>
-                            <div class="role-option" onclick="selectRole('super_admin')" data-role="super_admin">
-                                <i class="fas fa-crown"></i><br>
-                                <strong>Super Admin</strong><br>
-                                <small>Acceso total</small>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-                        <input type="hidden" name="new_role" id="selectedRole" value="">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="reason" style="color: white; font-weight: bold;">Motivo del Ascenso:</label>
-                        <textarea name="reason" id="reason" class="glass-input" rows="3" placeholder="Explica el motivo del ascenso..." required style="margin-top: 8px;"></textarea>
-                    </div>
-
-                    <div style="text-align: center; margin-top: 25px;">
-                        <button type="submit" class="glass-button" style="background: linear-gradient(45deg, #9c27b0, #673ab7);">
-                            <i class="fas fa-level-up-alt"></i>
-                            Confirmar Ascenso
-                        </button>
-                    </div>
-                </form>
             </div>
-
-            <!-- Recent Promotions Log -->
-            <?php if (!empty($recent_promotions)): ?>
-            <div class="promotions-log">
-                <h3 class="card-title">
-                    <i class="fas fa-history"></i>
-                    Historial de Ascensos Recientes
-                </h3>
-                <?php foreach ($recent_promotions as $promotion): ?>
-                    <div class="log-entry">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <strong style="color: white;">
-                                    <?php echo htmlspecialchars($promotion['promoted_username'] ?? 'Usuario eliminado'); ?>
-                                </strong>
-                                ascendido de 
-                                <span class="user-role role-<?php echo $promotion['old_role']; ?>">
-                                    <?php echo ucfirst($promotion['old_role']); ?>
-                                </span>
-                                a 
-                                <span class="user-role role-<?php echo $promotion['new_role']; ?>">
-                                    <?php echo ucfirst($promotion['new_role']); ?>
-                                </span>
-                                <br>
-                                <small style="color: rgba(255,255,255,0.7);">
-                                    Por: <?php echo htmlspecialchars($promotion['promoter_username'] ?? 'Usuario eliminado'); ?>
-                                </small>
-                                <?php if ($promotion['reason']): ?>
-                                    <br>
-                                    <small style="color: rgba(255,255,255,0.8);">
-                                        <em>"<?php echo htmlspecialchars($promotion['reason']); ?>"</em>
-                                    </small>
-                                <?php endif; ?>
-                            </div>
-                            <small style="color: rgba(255,255,255,0.6);">
-                                <?php echo date('d/m/Y H:i', strtotime($promotion['created_at'])); ?>
-                            </small>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-            <?php endif; ?>
         </div>
     </div>
 
-    <script>
-        let selectedUserId = null;
-        let selectedUserCurrentRole = null;
-        let selectedRole = null;
+    <!-- Promotion Modal -->
+    <div id="promotionModal" class="promotion-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Gestionar Usuario</h3>
+                <button class="close-modal" onclick="closePromotionModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
 
-        function selectUser(userId, username, currentRole) {
-            // Remove previous selection
-            document.querySelectorAll('.user-card').forEach(card => {
+            <form id="promotionForm">
+                <input type="hidden" id="modalUserId" name="user_id">
+                <input type="hidden" id="modalAction" name="action" value="promote_user">
+
+                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <img id="modalUserAvatarImg" style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);" 
+                             onerror="this.style.display='none'; document.getElementById('modalUserAvatar').style.display='flex';">
+                        <div id="modalUserAvatar" style="width: 50px; height: 50px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;"></div>
+                        <div>
+                            <h4 id="modalUserName" style="color: #ffffff; margin: 0;"></h4>
+                            <p id="modalCurrentRole" style="color: rgba(255,255,255,0.7); margin: 5px 0 0 0; font-size: 14px;"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="color: #ffffff; font-weight: bold; margin-bottom: 10px; display: block;">
+                        Nuevo Rol:
+                    </label>
+                    <div class="role-selection">
+                        <div class="role-card" data-role="usuario" onclick="selectModalRole('usuario')">
+                            <i class="fas fa-user" style="font-size: 24px; margin-bottom: 8px;"></i>
+                            <div style="font-weight: bold;">Usuario</div>
+                            <small>Acceso básico</small>
+                        </div>
+                        <div class="role-card" data-role="operador" onclick="selectModalRole('operador')">
+                            <i class="fas fa-cog" style="font-size: 24px; margin-bottom: 8px;"></i>
+                            <div style="font-weight: bold;">Operador</div>
+                            <small>Gestión de tiempos</small>
+                        </div>
+                        <div class="role-card" data-role="administrador" onclick="selectModalRole('administrador')">
+                            <i class="fas fa-shield-alt" style="font-size: 24px; margin-bottom: 8px;"></i>
+                            <div style="font-weight: bold;">Administrador</div>
+                            <small>Gestión completa</small>
+                        </div>
+                        <?php if ($user_role === 'super_admin'): ?>
+                        <div class="role-card" data-role="super_admin" onclick="selectModalRole('super_admin')">
+                            <i class="fas fa-crown" style="font-size: 24px; margin-bottom: 8px;"></i>
+                            <div style="font-weight: bold;">Super Admin</div>
+                            <small>Acceso total</small>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <input type="hidden" id="modalSelectedRole" name="new_role">
+                </div>
+
+                <div class="form-group">
+                    <label style="color: #ffffff; font-weight: bold; margin-bottom: 10px; display: block;">
+                        Tipo de Motivo:
+                    </label>
+                    <div class="reason-type-selector">
+                        <button type="button" class="reason-type-btn active" id="autoReasonBtn" onclick="selectReasonType('automatic')">
+                            <i class="fas fa-magic"></i><br>
+                            Automático
+                        </button>
+                        <button type="button" class="reason-type-btn" id="manualReasonBtn" onclick="selectReasonType('manual')">
+                            <i class="fas fa-edit"></i><br>
+                            Manual
+                        </button>
+                    </div>
+                    <input type="hidden" id="modalReasonType" name="reason_type" value="automatic">
+                </div>
+
+                <div class="manual-reason" id="manualReasonContainer">
+                    <label style="color: #ffffff; font-weight: bold; margin-bottom: 8px; display: block;">
+                        Motivo Personalizado:
+                    </label>
+                    <textarea id="modalReason" name="reason" class="glass-input" rows="3" placeholder="Explica el motivo del cambio de rango..."></textarea>
+                </div>
+
+                <button type="submit" class="submit-promotion">
+                    <i class="fas fa-save"></i>
+                    Confirmar Cambio de Rango
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/js/notifications.js"></script>
+    <script>
+        let currentModalUser = null;
+        let selectedModalRole = null;
+        let currentReasonType = 'automatic';
+
+        // Search functionality for users
+        document.getElementById('userSearch').addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const rows = document.querySelectorAll('#usersTableBody tr');
+            
+            rows.forEach(row => {
+                const username = row.dataset.username.toLowerCase();
+                if (username.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+
+        // History search functionality (fixed like userSearch)
+        document.getElementById('historySearch').addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const items = document.querySelectorAll('.history-item');
+            
+            items.forEach(item => {
+                const username = (item.dataset.username || '').toLowerCase();
+                const promoter = (item.dataset.promoter || '').toLowerCase();
+                const reason = (item.dataset.reason || '').toLowerCase();
+                
+                if (username.includes(searchTerm) || promoter.includes(searchTerm) || reason.includes(searchTerm)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+
+        function openPromotionModal(userId, username, currentRole) {
+            currentModalUser = { id: userId, username: username, role: currentRole };
+            
+            document.getElementById('modalUserId').value = userId;
+            document.getElementById('modalUserName').textContent = username;
+            
+            // Set avatar image
+            const avatarImg = document.getElementById('modalUserAvatarImg');
+            const avatarFallback = document.getElementById('modalUserAvatar');
+            avatarImg.src = `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=s`;
+            avatarImg.style.display = 'block';
+            avatarFallback.style.display = 'none';
+            avatarFallback.textContent = username.charAt(0).toUpperCase();
+            
+            document.getElementById('modalCurrentRole').textContent = `Rol actual: ${currentRole.charAt(0).toUpperCase() + currentRole.slice(1)}`;
+            
+            // Reset form
+            selectedModalRole = null;
+            document.getElementById('modalSelectedRole').value = '';
+            document.querySelectorAll('.role-card').forEach(card => {
+                card.classList.remove('selected', 'disabled');
+            });
+            
+            // Disable current role
+            const currentRoleCard = document.querySelector(`[data-role="${currentRole}"]`);
+            if (currentRoleCard) {
+                currentRoleCard.classList.add('disabled');
+            }
+
+            // Reset reason type
+            selectReasonType('automatic');
+            
+            document.getElementById('promotionModal').style.display = 'flex';
+        }
+
+        function closePromotionModal() {
+            document.getElementById('promotionModal').style.display = 'none';
+            currentModalUser = null;
+            selectedModalRole = null;
+        }
+
+        function selectModalRole(role) {
+            if (currentModalUser && role === currentModalUser.role) return;
+            
+            const roleCard = document.querySelector(`[data-role="${role}"]`);
+            if (roleCard.classList.contains('disabled')) return;
+            
+            document.querySelectorAll('.role-card').forEach(card => {
                 card.classList.remove('selected');
             });
-
-            // Select current card
-            event.currentTarget.classList.add('selected');
-
-            selectedUserId = userId;
-            selectedUserCurrentRole = currentRole;
-            document.getElementById('selectedUserId').value = userId;
-            document.getElementById('selectedUserName').textContent = username;
-
-            // Show promotion form
-            document.getElementById('promotionForm').classList.add('active');
-
-            // Reset role selection
-            selectedRole = null;
-            document.getElementById('selectedRole').value = '';
-            document.querySelectorAll('.role-option').forEach(option => {
-                option.classList.remove('selected');
-                option.classList.remove('disabled');
-            });
-
-            // Disable current role option
-            const currentRoleOption = document.querySelector(`[data-role="${currentRole}"]`);
-            if (currentRoleOption) {
-                currentRoleOption.classList.add('disabled');
-            }
-
-            // Disable roles based on permissions
-            <?php if ($user_role !== 'super_admin'): ?>
-            const adminOption = document.querySelector('[data-role="administrador"]');
-            if (adminOption && '<?php echo $user_role; ?>' === 'administrador') {
-                adminOption.classList.add('disabled');
-            }
-            <?php endif; ?>
+            
+            roleCard.classList.add('selected');
+            selectedModalRole = role;
+            document.getElementById('modalSelectedRole').value = role;
         }
 
-        function selectRole(role) {
-            if (event.currentTarget.classList.contains('disabled')) {
-                return;
-            }
-
-            if (role === selectedUserCurrentRole) {
-                return;
-            }
-
-            // Remove previous selection
-            document.querySelectorAll('.role-option').forEach(option => {
-                option.classList.remove('selected');
+        function selectReasonType(type) {
+            currentReasonType = type;
+            document.getElementById('modalReasonType').value = type;
+            
+            // Update buttons
+            document.querySelectorAll('.reason-type-btn').forEach(btn => {
+                btn.classList.remove('active');
             });
-
-            // Select current role
-            event.currentTarget.classList.add('selected');
-            selectedRole = role;
-            document.getElementById('selectedRole').value = role;
+            
+            if (type === 'automatic') {
+                document.getElementById('autoReasonBtn').classList.add('active');
+                document.getElementById('manualReasonContainer').classList.remove('show');
+            } else {
+                document.getElementById('manualReasonBtn').classList.add('active');
+                document.getElementById('manualReasonContainer').classList.add('show');
+            }
         }
 
-        // Form validation and submission
+        // Form submission (simplified and fixed)
         document.getElementById('promotionForm').addEventListener('submit', function(e) {
-            if (!selectedUserId || !selectedRole) {
-                e.preventDefault();
-                alert('Por favor selecciona un usuario y un nuevo rol.');
-                return false;
+            e.preventDefault();
+            
+            if (!selectedModalRole) {
+                showNotification('Por favor selecciona un nuevo rol.', 'error');
+                return;
             }
-
-            if (selectedRole === selectedUserCurrentRole) {
-                e.preventDefault();
-                alert('El usuario ya tiene ese rol.');
-                return false;
+            
+            if (currentReasonType === 'manual' && !document.getElementById('modalReason').value.trim()) {
+                showNotification('Por favor proporciona un motivo personalizado.', 'error');
+                return;
             }
-
-            const reason = document.getElementById('reason').value.trim();
-            if (!reason) {
-                e.preventDefault();
-                alert('Por favor proporciona un motivo para el ascenso.');
-                return false;
-            }
-
-            if (!confirm(`¿Estás seguro de ascender al usuario a ${selectedRole}?`)) {
-                e.preventDefault();
-                return false;
-            }
-
-            // Let the form submit normally - no AJAX needed
-            return true;
+            
+            const formData = new FormData(this);
+            
+            // Disable submit button to prevent double submission
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+            
+            fetch('promotions.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    showNotification(data.message, 'success');
+                    closePromotionModal();
+                    
+                    // Update table row in real time
+                    updateUserTableRow(data.user_id, data.new_role);
+                    
+                    // Refresh both users and history sections immediately
+                    setTimeout(() => {
+                        refreshUsersTable();
+                        refreshHistorySection();
+                    }, 100);
+                } else {
+                    showNotification(data.message, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error al procesar la solicitud: ' + error.message, 'error');
+            })
+            .finally(() => {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            });
         });
+
+        // Close modal on outside click
+        document.getElementById('promotionModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closePromotionModal();
+            }
+        });
+
+        // Function to update user table row in real time
+        function updateUserTableRow(userId, newRole) {
+            const row = document.querySelector(`tr[data-user-id="${userId}"]`);
+            if (row) {
+                // Update role badge
+                const roleBadge = row.querySelector('.user-role-badge');
+                if (roleBadge) {
+                    roleBadge.className = `user-role-badge role-${newRole}`;
+                    roleBadge.textContent = newRole.charAt(0).toUpperCase() + newRole.slice(1);
+                }
+                
+                // Update onclick attribute
+                const actionBtn = row.querySelector('.action-btn');
+                if (actionBtn && currentModalUser) {
+                    const username = currentModalUser.username;
+                    actionBtn.setAttribute('onclick', `openPromotionModal(${userId}, '${username}', '${newRole}')`);
+                }
+            }
+        }
+
+        // Function to refresh users table (like lista-pagas.php)
+        function refreshUsersTable() {
+            fetch('promotions.php?action=get_users')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.users) {
+                        const tbody = document.getElementById('usersTableBody');
+                        tbody.innerHTML = '';
+                        
+                        data.users.forEach(user => {
+                            const row = createUserTableRow(user);
+                            tbody.appendChild(row);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing users table:', error);
+                });
+        }
+
+        // Function to refresh history section (like lista-pagas.php)
+        function refreshHistorySection() {
+            fetch('promotions.php?action=get_history')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.history) {
+                        const historyContainer = document.getElementById('historyContainer');
+                        historyContainer.innerHTML = '';
+                        
+                        data.history.forEach(promotion => {
+                            const historyItem = createHistoryItem(promotion);
+                            historyContainer.appendChild(historyItem);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing history:', error);
+                });
+        }
+
+        // Function to create user table row element
+        function createUserTableRow(user) {
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-user-id', user.id);
+            tr.setAttribute('data-username', user.habbo_username);
+            
+            const userInitial = user.habbo_username.charAt(0).toUpperCase();
+            const createdAt = new Date(user.created_at).toLocaleDateString('es-ES');
+            
+            tr.innerHTML = `
+                <td>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(user.habbo_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                             alt="Avatar de ${user.habbo_username}"
+                             style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                            ${userInitial}
+                        </div>
+                        <div>
+                            <div style="color: #ffffff; font-weight: 500;">
+                                ${user.habbo_username}
+                            </div>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="user-role-badge role-${user.role}">
+                        ${user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                    </span>
+                </td>
+                <td style="color: rgba(255,255,255,0.8);">
+                    ${createdAt}
+                </td>
+                <td>
+                    <button class="action-btn" onclick="openPromotionModal(${user.id}, '${user.habbo_username}', '${user.role}')">
+                        <i class="fas fa-edit"></i>
+                        Gestionar
+                    </button>
+                </td>
+            `;
+            
+            return tr;
+        }
+
+        // Function to create history item element
+        function createHistoryItem(promotion) {
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.setAttribute('data-username', promotion.promoted_username || '');
+            div.setAttribute('data-promoter', promotion.promoter_username || '');
+            div.setAttribute('data-reason', promotion.reason || '');
+            
+            const userInitial = promotion.promoted_username ? promotion.promoted_username.charAt(0).toUpperCase() : 'U';
+            const promotedUsername = promotion.promoted_username || 'Usuario eliminado';
+            const promoterUsername = promotion.promoter_username || 'Usuario eliminado';
+            const createdAt = new Date(promotion.created_at).toLocaleDateString('es-ES') + ' ' + 
+                              new Date(promotion.created_at).toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'});
+            
+            div.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        ${promotion.promoted_username ? `
+                            <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(promotion.promoted_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                 alt="Avatar de ${promotedUsername}"
+                                 style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                ${userInitial}
+                            </div>
+                        ` : ''}
+                        <strong style="color: #ffffff;">
+                            ${promotedUsername}
+                        </strong>
+                    </div>
+                    <small style="color: rgba(255,255,255,0.6);">
+                        ${createdAt}
+                    </small>
+                </div>
+                <div style="color: rgba(255,255,255,0.9); margin-bottom: 5px;">
+                    <span class="user-role-badge role-${promotion.old_role}" style="font-size: 0.7em;">
+                        ${promotion.old_role.charAt(0).toUpperCase() + promotion.old_role.slice(1)}
+                    </span>
+                    <i class="fas fa-arrow-right" style="margin: 0 8px; color: rgba(255,255,255,0.6);"></i>
+                    <span class="user-role-badge role-${promotion.new_role}" style="font-size: 0.7em;">
+                        ${promotion.new_role.charAt(0).toUpperCase() + promotion.new_role.slice(1)}
+                    </span>
+                </div>
+                <small style="color: rgba(255,255,255,0.7);">
+                    Por: ${promoterUsername}
+                </small>
+                ${promotion.reason ? `
+                    <div style="margin-top: 8px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                        <small style="color: rgba(255,255,255,0.8); font-style: italic;">
+                            "${promotion.reason}"
+                        </small>
+                    </div>
+                ` : ''}
+            `;
+            
+            return div;
+        }
+
+        // Auto-refresh history every 30 seconds (like lista-pagas.php)
+        setInterval(() => {
+            refreshHistorySection();
+            refreshUsersTable();
+        }, 30000);
     </script>
-    <script src="assets/js/notifications.js"></script>
 </body>
 </html>
