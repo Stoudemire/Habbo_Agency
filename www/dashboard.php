@@ -15,7 +15,7 @@ function getSiteTitle() {
     if ($cached_title !== null) {
         return $cached_title;
     }
-    
+
     global $pdo;
     try {
         $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key = 'site_title'");
@@ -41,13 +41,13 @@ if (!isset($_SESSION['user_data'])) {
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $user = $stmt->fetch();
-    
+
     if (!$user) {
         session_destroy();
         header('Location: index.php');
         exit();
     }
-    
+
     $_SESSION['user_data'] = $user;
 } else {
     $user = $_SESSION['user_data'];
@@ -64,7 +64,7 @@ try {
     $stmt = $pdo->prepare("SELECT * FROM user_ranks WHERE rank_name = ?");
     $stmt->execute([$user_role]);
     $rank_info = $stmt->fetch();
-    
+
     if ($rank_info && !empty($rank_info['permissions'])) {
         $user_permissions = json_decode($rank_info['permissions'], true) ?: [];
     }
@@ -84,7 +84,7 @@ function hasPermission($permission, $user_permissions, $user_role) {
     if ($user_role === 'super_admin') {
         return true;
     }
-    
+
     return in_array($permission, $user_permissions);
 }
 
@@ -122,26 +122,22 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             flex-shrink: 0;
         }
 
-        .rank-logo-img {
-            width: 80px;
-            height: 80px;
-            border-radius: 12px;
-            object-fit: cover;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        .rank-logo .user-avatar-container {
+            width: 150px;
+            height: 150px;
         }
 
-        .rank-logo-placeholder {
-            width: 80px;
-            height: 80px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 2.5em;
+        .rank-logo .rank-badge {
+            width: 40px;
+            height: 40px;
+            top: 50%;
+            left: -15px;
+            transform: translateY(-50%);
+        }
+
+        .rank-logo .rank-badge-img {
+            width: 28px;
+            height: 28px;
         }
 
         .rank-details {
@@ -217,6 +213,58 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             font-size: 0.9em;
         }
 
+        .user-avatar-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .habbo-avatar {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .user-avatar-fallback {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1.5em;
+        }
+
+        .rank-badge {
+            position: absolute;
+            top: 50%;
+            left: -15px;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            border: 3px solid rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .rank-badge-img {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+            border-radius: 4px;
+        }
+
         @media (max-width: 768px) {
             .rank-header {
                 flex-direction: column;
@@ -234,6 +282,21 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 min-width: auto;
                 text-align: center;
             }
+
+            .user-avatar-container {
+                width: 50px;
+                height: 50px;
+            }
+
+            .rank-badge {
+                width: 20px;
+                height: 20px;
+            }
+
+            .rank-badge-img {
+                width: 14px;
+                height: 14px;
+            }
         }
     </style>
 </head>
@@ -246,18 +309,31 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     <i class="fas fa-tachometer-alt"></i>
                     Dashboard
                 </h1>
-                
+
                 <div class="user-section">
                     <div class="user-info">
-                        <div class="user-avatar" <?php if ($user['profile_image'] && file_exists($user['profile_image'])): ?>style="background-image: url('<?php echo htmlspecialchars($user['profile_image']); ?>'); background-size: cover; background-position: center;"<?php endif; ?>>
-                            <?php if (!$user['profile_image'] || !file_exists($user['profile_image'])): echo $userInitial; endif; ?>
+                        <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
+                        <div class="header-rank-image" style="width: 70px; height: 70px; margin-right: 15px;">
+                            <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" 
+                                 alt="Rango" 
+                                 style="width: 100%; height: 100%; object-fit: contain; border-radius: 8px; border: 2px solid rgba(255, 255, 255, 0.3);">
                         </div>
-                        <div class="user-details">
-                            <h3><?php echo htmlspecialchars($username); ?></h3>
-                            <p><?php echo $user_role === 'super_admin' ? 'Desarrollador' : ucfirst($user_role); ?></p>
+                        <?php endif; ?>
+                        <div class="user-avatar-container" style="width: 70px; height: 70px;">
+                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($user['habbo_username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
+                             alt="Avatar de <?php echo htmlspecialchars($user['habbo_username']); ?>" 
+                             class="habbo-avatar"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="user-avatar-fallback" style="display: none;">
+                            <?php echo $userInitial; ?>
                         </div>
                     </div>
-                    
+                        <div class="user-details">
+                            <h3><?php echo htmlspecialchars($user['habbo_username']); ?></h3>
+                            <p><?php echo $user_role === 'super_admin' ? 'Desarrollador' : htmlspecialchars($rank_info['display_name'] ?? ucfirst($user_role)); ?></p>
+                        </div>
+                    </div>
+
                     <a href="?logout=1" class="logout-btn">
                         <i class="fas fa-sign-out-alt"></i>
                         Salir
@@ -276,13 +352,20 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
         <div class="rank-display-card">
             <div class="rank-header">
                 <div class="rank-logo">
-                    <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
-                        <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" alt="Logo del rango" class="rank-logo-img">
-                    <?php else: ?>
-                        <div class="rank-logo-placeholder">
-                            <i class="fas fa-crown"></i>
+                    <div class="user-avatar-container">
+                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($user['habbo_username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std" 
+                             alt="Avatar de <?php echo htmlspecialchars($user['habbo_username']); ?>" 
+                             class="habbo-avatar"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="user-avatar-fallback" style="display: none;">
+                            <?php echo $userInitial; ?>
                         </div>
-                    <?php endif; ?>
+                        <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
+                            <div class="rank-badge">
+                                <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" alt="Rango" class="rank-badge-img">
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <div class="rank-details">
                     <h2 class="rank-title"><?php echo htmlspecialchars($rank_info['display_name'] ?? ucfirst($user_role)); ?></h2>
@@ -317,7 +400,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     <?php endif; ?>
                 </p>
             </div>
-            
+
             <!-- Schedule Card - Available to ALL users -->
             <div class="dashboard-card" onclick="window.location.href='schedule.php'" style="cursor: pointer;">
                 <h3 class="card-title">
@@ -328,7 +411,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     Consulta los horarios de funcionamiento de la agencia, días especiales y estados de apertura en tiempo real.
                 </p>
             </div>
-            
+
             <?php if (hasPermission('admin_panel', $user_permissions, $user_role)): ?>
             <!-- Admin Panel Card - Only for users with admin_panel permission -->
             <div class="dashboard-card" onclick="window.location.href='admin-panel.php'" style="cursor: pointer;">
@@ -341,7 +424,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 </p>
             </div>
             <?php endif; ?>
-            
+
             <?php if (hasPermission('manage_roles', $user_permissions, $user_role)): ?>
             <!-- Rank Management Card - Only for users with manage_roles permission -->
             <div class="dashboard-card" onclick="window.location.href='rank-management.php'" style="cursor: pointer;">
@@ -354,7 +437,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 </p>
             </div>
             <?php endif; ?>
-            
+
             <?php if (hasPermission('manage_config', $user_permissions, $user_role)): ?>
             <!-- System Configuration Card - Only for users with manage_config permission -->
             <div class="dashboard-card" onclick="window.location.href='developer-panel.php'" style="cursor: pointer;">
@@ -380,7 +463,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 </p>
             </div>
             <?php endif; ?>
-            
+
         </div>
     </div>
     <script src="assets/js/notifications.js"></script>
