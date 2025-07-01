@@ -115,11 +115,15 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
         .rank-header {
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: 10px;
         }
 
         .rank-logo {
             flex-shrink: 0;
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 2px;
         }
 
         .rank-logo .user-avatar-container {
@@ -127,17 +131,14 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             height: 150px;
         }
 
-        .rank-logo .rank-badge {
-            width: 40px;
-            height: 40px;
-            top: 50%;
-            left: -15px;
-            transform: translateY(-50%);
-        }
-
-        .rank-logo .rank-badge-img {
-            width: 28px;
-            height: 28px;
+        .rank-image-beside {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            object-fit: cover;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            margin-left: -5px;
         }
 
         .rank-details {
@@ -244,9 +245,8 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
 
         .rank-badge {
             position: absolute;
-            top: 50%;
-            left: -15px;
-            transform: translateY(-50%);
+            top: 15px;
+            right: -8px;
             width: 40px;
             height: 40px;
             background: rgba(255, 255, 255, 0.95);
@@ -291,6 +291,8 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             .rank-badge {
                 width: 20px;
                 height: 20px;
+                right: -4px;
+                top: 8px;
             }
 
             .rank-badge-img {
@@ -312,22 +314,22 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
 
                 <div class="user-section">
                     <div class="user-info">
-                        <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
-                        <div class="header-rank-image" style="width: 70px; height: 70px; margin-right: 15px;">
-                            <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" 
-                                 alt="Rango" 
-                                 style="width: 100%; height: 100%; object-fit: contain; border-radius: 8px; border: 2px solid rgba(255, 255, 255, 0.3);">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
+                                <div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center;">
+                                    <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" alt="Imagen del rango" style="width: 50px; height: 50px; object-fit: cover; border-radius: 6px;">
+                                </div>
+                            <?php endif; ?>
+                            <div class="user-avatar-container" style="width: 70px; height: 70px;">
+                            <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($user['habbo_username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
+                                 alt="Avatar de <?php echo htmlspecialchars($user['habbo_username']); ?>" 
+                                 class="habbo-avatar"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="user-avatar-fallback" style="display: none;">
+                                <?php echo $userInitial; ?>
+                            </div>
+                            </div>
                         </div>
-                        <?php endif; ?>
-                        <div class="user-avatar-container" style="width: 70px; height: 70px;">
-                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($user['habbo_username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
-                             alt="Avatar de <?php echo htmlspecialchars($user['habbo_username']); ?>" 
-                             class="habbo-avatar"
-                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <div class="user-avatar-fallback" style="display: none;">
-                            <?php echo $userInitial; ?>
-                        </div>
-                    </div>
                         <div class="user-details">
                             <h3><?php echo htmlspecialchars($user['habbo_username']); ?></h3>
                             <p><?php echo $user_role === 'super_admin' ? 'Desarrollador' : htmlspecialchars($rank_info['display_name'] ?? ucfirst($user_role)); ?></p>
@@ -360,11 +362,6 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                         <div class="user-avatar-fallback" style="display: none;">
                             <?php echo $userInitial; ?>
                         </div>
-                        <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
-                            <div class="rank-badge">
-                                <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" alt="Rango" class="rank-badge-img">
-                            </div>
-                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="rank-details">
