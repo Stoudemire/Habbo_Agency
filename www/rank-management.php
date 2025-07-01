@@ -70,6 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
             $rank_image = null;
 
+            $credits_time_hours = intval($_POST['credits_time_hours']);
+            $credits_time_minutes = intval($_POST['credits_time_minutes']);
+            $credits_per_interval = intval($_POST['credits_per_interval']);
+
             // Handle image upload
             if (isset($_FILES['rank_image']) && $_FILES['rank_image']['error'] === UPLOAD_ERR_OK) {
                 $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
@@ -113,8 +117,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $permissions_json = json_encode($permissions);
                     try {
                         // Try with rank_image column first
-                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image) VALUES (?, ?, ?, ?, ?)");
-                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image])) {
+                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image, credits_time_hours, credits_time_minutes, credits_per_interval) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval])) {
                             $success_message = "Rango creado exitosamente.";
                         } else {
                             $error_message = "Error al crear el rango.";
@@ -122,8 +126,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         // If rank_image column doesn't exist, create without it
                         try {
-                            $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions) VALUES (?, ?, ?, ?)");
-                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json])) {
+                            $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, credits_time_hours, credits_time_minutes, credits_per_interval) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval])) {
                                 $success_message = "Rango creado exitosamente. Nota: Para usar imágenes, agrega la columna rank_image a la tabla.";
                             } else {
                                 $error_message = "Error al crear el rango.";
@@ -140,6 +144,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $display_name = trim($_POST['display_name']);
             $level = intval($_POST['level']);
             $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
+
+            $credits_time_hours = intval($_POST['credits_time_hours']);
+            $credits_time_minutes = intval($_POST['credits_time_minutes']);
+            $credits_per_interval = intval($_POST['credits_per_interval']);
 
             // Get current rank data for image handling
             $rank_image = null; // Default value
@@ -200,8 +208,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $permissions_json = json_encode($permissions);
                     try {
                         // Try with rank_image column first
-                        $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, rank_image = ? WHERE id = ?");
-                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $rank_id])) {
+                        $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, rank_image = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ? WHERE id = ?");
+                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $rank_id])) {
                             $success_message = "Rango actualizado exitosamente.";
                         } else {
                             $error_message = "Error al actualizar el rango.";
@@ -209,8 +217,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         // If rank_image column doesn't exist, update without it
                         try {
-                            $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ? WHERE id = ?");
-                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_id])) {
+                            $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ? WHERE id = ?");
+                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $rank_id])) {
                                 $success_message = "Rango actualizado exitosamente. Nota: Para usar imágenes, agrega la columna rank_image a la tabla.";
                             } else {
                                 $error_message = "Error al actualizar el rango.";
@@ -720,6 +728,24 @@ try {
             align-items: center;
             gap: 8px;
         }
+
+        .credits-config-group {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .credits-config-group h4 {
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .credits-config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
     </style>
 </head>
 <body class="dashboard-body">
@@ -754,7 +780,7 @@ try {
                 </div>
             <?php endif; ?>
 
-            <div class="dashboard-card">
+The code has been modified to include credit configuration options for each rank, migrating the functionality from the developer panel.            <div class="dashboard-card">
                 <div class="section-header">
                     <h3 class="card-title">
                         <i class="fas fa-users-cog"></i>
@@ -814,7 +840,7 @@ try {
 
                                 <div class="rank-actions">
                                     <?php if (!in_array($rank['rank_name'], ['super_admin', 'administrador', 'operador', 'usuario'])): ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>')">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>)">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -827,7 +853,7 @@ try {
                                             </button>
                                         </form>
                                     <?php else: ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>')">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>)">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -879,6 +905,24 @@ try {
                     <small style="color: rgba(255, 255, 255, 0.7); font-size: 0.9em; margin-top: 5px; display: block;">Formatos permitidos: JPG, PNG, GIF. Tamaño recomendado: 64x64px</small>
                 </div>
 
+                 <div class="credits-config-group">
+                    <h4>Configuración de Créditos</h4>
+                    <div class="credits-config-grid">
+                        <div class="rank-form-group">
+                            <label for="credits_time_hours">Horas:</label>
+                            <input type="number" id="credits_time_hours" name="credits_time_hours" min="0" max="23" value="1" required>
+                        </div>
+                        <div class="rank-form-group">
+                            <label for="credits_time_minutes">Minutos:</label>
+                            <input type="number" id="credits_time_minutes" name="credits_time_minutes" min="0" max="59" value="0" required>
+                        </div>
+                        <div class="rank-form-group">
+                            <label for="credits_per_interval">Créditos por Intervalo:</label>
+                            <input type="number" id="credits_per_interval" name="credits_per_interval" min="1" value="1" required>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="permissions-section">
                     <h4><i class="fas fa-key"></i> Permisos del Rango</h4>
                     <div class="permissions-grid">
@@ -919,6 +963,11 @@ try {
             document.getElementById('level').value = '';
             document.getElementById('rank_image').value = '';
 
+            // Clear credit config
+            document.getElementById('credits_time_hours').value = '1';
+            document.getElementById('credits_time_minutes').value = '0';
+            document.getElementById('credits_per_interval').value = '1';
+
             // Uncheck all permissions
             const checkboxes = document.querySelectorAll('input[name="permissions[]"]');
             checkboxes.forEach(checkbox => checkbox.checked = false);
@@ -927,7 +976,7 @@ try {
             document.body.style.overflow = 'hidden';
         }
 
-        function openEditRankModal(rankId, rankName, displayName, level, permissions) {
+        function openEditRankModal(rankId, rankName, displayName, level, permissions, creditsTimeHours, creditsTimeMinutes, creditsPerInterval) {
             // Set modal for edit mode
             document.getElementById('modal-title').innerHTML = '<i class="fas fa-edit"></i> Editar Rango';
             document.getElementById('modal-action').value = 'edit_rank';
@@ -939,6 +988,11 @@ try {
             document.getElementById('display_name').value = displayName;
             document.getElementById('level').value = level;
             document.getElementById('rank_image').value = ''; // Clear image field for new upload
+
+            // Fill credit config
+            document.getElementById('credits_time_hours').value = creditsTimeHours;
+            document.getElementById('credits_time_minutes').value = creditsTimeMinutes;
+            document.getElementById('credits_per_interval').value = creditsPerInterval;
 
             // Parse and set permissions
             let permissionsArray = [];

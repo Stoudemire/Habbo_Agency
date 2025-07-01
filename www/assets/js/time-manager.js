@@ -238,12 +238,17 @@ class TimeManager {
                         timerElement.textContent = this.formatTime(currentTotal);
                     }
 
-                    // Update credits in real time
+                    // Update credits in real time - only for completed intervals
                     const creditsElement = document.getElementById(`credits-${session.id}`);
-                    if (creditsElement) {
+                    if (creditsElement && session.credits_config) {
                         const totalMinutes = currentTotal / 60;
-                        const creditsEarned = Math.round(totalMinutes * this.creditsPerMinute);
-                        creditsElement.textContent = creditsEarned;
+                        const creditsConfig = session.credits_config;
+                        const intervalMinutes = (creditsConfig.time_hours * 60) + creditsConfig.time_minutes;
+                        if (intervalMinutes > 0) {
+                            const completedIntervals = Math.floor(totalMinutes / intervalMinutes);
+                            const creditsEarned = completedIntervals * creditsConfig.credits_per_interval;
+                            creditsElement.textContent = creditsEarned;
+                        }
                     }
                 }, 1000);
 

@@ -20,32 +20,46 @@ if (!isset($_SESSION['user_role'])) {
 }
 $user_role = $_SESSION['user_role'];
 
-// Get credits configuration with static caching
-static $credits_config = null;
-if ($credits_config === null) {
-    $stmt = $pdo->prepare("SELECT config_key, config_value FROM system_config WHERE config_key IN ('credits_calculation_type', 'credits_per_minute', 'time_hours', 'time_minutes', 'credits_per_interval')");
-    $stmt->execute();
-    $config_data = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+// Function to get credits configuration for a specific user by their rank
+function getCreditsConfigForUser($pdo, $user_id) {
+    static $credits_cache = [];
     
-    $credits_config = [
-        'calculation_type' => $config_data['credits_calculation_type'] ?? 'minute',
-        'credits_per_minute' => intval($config_data['credits_per_minute'] ?? 1),
-        'time_hours' => intval($config_data['time_hours'] ?? 1),
-        'time_minutes' => intval($config_data['time_minutes'] ?? 0),
-        'credits_per_interval' => intval($config_data['credits_per_interval'] ?? 1)
-    ];
-    
-    // Calculate effective credits per minute based on configuration
-    if ($credits_config['calculation_type'] === 'hour') {
+    if (!isset($credits_cache[$user_id])) {
+        // Get user's role and credits configuration from rank
+        $stmt = $pdo->prepare("
+            SELECT ur.credits_time_hours, ur.credits_time_minutes, ur.credits_per_interval 
+            FROM users u 
+            JOIN user_ranks ur ON u.role = ur.rank_name 
+            WHERE u.id = ?
+        ");
+        $stmt->execute([$user_id]);
+        $config = $stmt->fetch();
+        
+        if ($config) {
+            $credits_config = [
+                'time_hours' => intval($config['credits_time_hours'] ?? 1),
+                'time_minutes' => intval($config['credits_time_minutes'] ?? 0),
+                'credits_per_interval' => intval($config['credits_per_interval'] ?? 1)
+            ];
+        } else {
+            // Default configuration if no rank found
+            $credits_config = [
+                'time_hours' => 1,
+                'time_minutes' => 0,
+                'credits_per_interval' => 1
+            ];
+        }
+        
+        // Calculate total minutes and credits per minute
         $total_minutes = ($credits_config['time_hours'] * 60) + $credits_config['time_minutes'];
-        if ($total_minutes <= 0) $total_minutes = 60; // Default to 1 hour
-        $credits_config['effective_credits_per_minute'] = $credits_config['credits_per_interval'] / $total_minutes;
-    } else {
-        $credits_config['effective_credits_per_minute'] = $credits_config['credits_per_minute'];
+        if ($total_minutes <= 0) $total_minutes = 60;
+        
+        $credits_config['credits_per_minute'] = $credits_config['credits_per_interval'] / $total_minutes;
+        $credits_cache[$user_id] = $credits_config;
     }
+    
+    return $credits_cache[$user_id];
 }
-
-$credits_per_minute = $credits_config['effective_credits_per_minute'];
 
 // Define what interface to show based on role
 $can_manage_timers = in_array($user_role, ['super_admin', 'desarrollador', 'administrador', 'operador']);
@@ -89,9 +103,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 $total_seconds += $elapsed;
             }
             $session['current_total'] = $total_seconds;
-            // Calculate credits earned using the configured system
+            
+            // Get credits configuration for this user's rank
+            $user_credits_config = getCreditsConfigForUser($pdo, $session['user_id']);
+            
+            // Calculate credits earned using interval-based system (not proportional)
             $total_minutes = $total_seconds / 60;
-            $session['credits_earned'] = round($total_minutes * $credits_per_minute);
+            $interval_minutes = ($user_credits_config['time_hours'] * 60) + $user_credits_config['time_minutes'];
+            if ($interval_minutes <= 0) $interval_minutes = 60;
+            
+            // Only give credits for completed intervals
+            $completed_intervals = floor($total_minutes / $interval_minutes);
+            $session['credits_earned'] = $completed_intervals * $user_credits_config['credits_per_interval'];
+            
+            // Add credits config to session for JavaScript
+            $session['credits_config'] = $user_credits_config;
         }
         
         // Add debug info
@@ -331,6 +357,10 @@ foreach ($active_sessions as &$session) {
         $total_seconds += $elapsed;
     }
     $session['current_total'] = $total_seconds;
+    
+    // Get and add credits configuration for this user
+    $user_credits_config = getCreditsConfigForUser($pdo, $session['user_id']);
+    $session['credits_config'] = $user_credits_config;
 }
 
 $current_user = $_SESSION['username'];
@@ -684,8 +714,12 @@ $current_user = $_SESSION['username'];
                                     <td>
                                         <span id="credits-<?php echo $session['id']; ?>" class="credits-display">
                                             <?php 
+                                            $user_credits_config = getCreditsConfigForUser($pdo, $session['user_id']);
                                             $total_minutes = $total_seconds / 60;
-                                            $credits_earned = round($total_minutes * $credits_per_minute);
+                                            $interval_minutes = ($user_credits_config['time_hours'] * 60) + $user_credits_config['time_minutes'];
+                                            if ($interval_minutes <= 0) $interval_minutes = 60;
+                                            $completed_intervals = floor($total_minutes / $interval_minutes);
+                                            $credits_earned = $completed_intervals * $user_credits_config['credits_per_interval'];
                                             echo $credits_earned;
                                             ?>
                                         </span>
@@ -729,8 +763,7 @@ $current_user = $_SESSION['username'];
         window.activeSessionsData = <?php echo json_encode($active_sessions); ?>;
         window.canManageTimers = <?php echo json_encode($can_manage_timers); ?>;
         window.userRole = <?php echo json_encode($user_role); ?>;
-        window.creditsPerMinute = <?php echo json_encode($credits_per_minute); ?>;
-        window.creditsConfig = <?php echo json_encode($credits_config); ?>;
+        
         window.currentUserId = <?php echo json_encode($_SESSION['user_id']); ?>;
         window.currentUsername = <?php echo json_encode($_SESSION['username']); ?>;
         

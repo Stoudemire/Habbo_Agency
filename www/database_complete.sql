@@ -88,19 +88,33 @@ CREATE TABLE IF NOT EXISTS business_hours (
     UNIQUE KEY unique_day (day_of_week)
 );
 
--- Insertar configuración básica del sistema
+-- Agregar columnas de configuración de créditos a user_ranks si no existen
+ALTER TABLE user_ranks 
+ADD COLUMN IF NOT EXISTS credits_time_hours INT DEFAULT 1,
+ADD COLUMN IF NOT EXISTS credits_time_minutes INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS credits_per_interval INT DEFAULT 1;
+
+-- Insertar configuración básica del sistema (sin configuración de créditos)
 INSERT IGNORE INTO system_config (config_key, config_value) VALUES
 ('site_title', 'Habbo Agency'),
-('company_logo', ''),
-('credits_per_hour', '1'),
-('credits_per_minute', '1'),
-('credits_calculation_type', 'minute');
+('company_logo', '');
 
--- Actualizar valores existentes para asegurar que ambos créditos sean 1 por defecto
--- (Esto corrige cualquier valor previo y establece 1 como valor estándar)
-UPDATE system_config SET config_value = '1' WHERE config_key = 'credits_per_minute';
-UPDATE system_config SET config_value = '1' WHERE config_key = 'credits_per_hour';
-UPDATE system_config SET config_value = 'minute' WHERE config_key = 'credits_calculation_type';
+-- Configurar créditos por defecto para rangos existentes que no tengan configuración
+UPDATE user_ranks SET 
+    credits_time_hours = 1,
+    credits_time_minutes = 0, 
+    credits_per_interval = 1
+WHERE credits_time_hours IS NULL OR credits_time_minutes IS NULL OR credits_per_interval IS NULL;
+
+-- Remover configuración de créditos del sistema (ahora se maneja por rango)
+DELETE FROM system_config WHERE config_key IN (
+    'credits_calculation_type', 
+    'time_hours', 
+    'time_minutes', 
+    'credits_per_interval', 
+    'credits_per_minute', 
+    'credits_per_hour'
+);per_hour';
 
 -- Insertar rangos básicos con jerarquía correcta
 INSERT IGNORE INTO user_ranks (rank_name, display_name, level, permissions) VALUES
