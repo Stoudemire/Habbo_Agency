@@ -175,6 +175,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             gap: 10px;
             margin-bottom: 12px;
             padding: 8px 0;
+            width: 100%;
         }
 
         .mission-label, .role-label {
@@ -182,22 +183,25 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             color: rgba(156, 39, 176, 0.9);
             min-width: 60px;
             font-size: 0.95em;
+            flex-shrink: 0;
         }
 
         .mission-text, .role-text {
             color: rgba(255, 255, 255, 0.9);
-            flex: 1;
             padding: 8px 12px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             font-size: 0.95em;
             line-height: 1.4;
-            min-height: 20px;
-        }
-
-        .rank-role .role-text {
-            padding-right: 48px; /* Same space as mission text to maintain symmetry */
+            min-height: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
+            flex: 1;
+            max-width: none;
+            min-width: 0;
         }
 
         .copy-btn {
@@ -211,8 +215,9 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             display: flex;
             align-items: center;
             justify-content: center;
-            min-width: 36px;
+            width: 36px;
             height: 36px;
+            flex-shrink: 0;
         }
 
         .copy-btn:hover {
@@ -235,8 +240,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             width: 150px;
             height: 150px;
             border-radius: 12px;
-            overflow: hidden;
-            border: 2px solid rgba(255, 255, 255, 0.2);
+            overflow: hidden;            border: 2px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
             background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
         }
@@ -280,6 +284,31 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             height: 28px;
             object-fit: contain;
             border-radius: 4px;
+        }
+
+        /* Static role colors for dashboard */
+        .user-role-badge, .role-text {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        /* Static role colors - Core roles */
+        .role-super_admin { background: rgba(239, 68, 68, 0.3) !important; color: #ef4444 !important; }
+        .role-administrador { background: rgba(59, 130, 246, 0.3) !important; color: #3b82f6 !important; }
+        .role-admin { background: rgba(59, 130, 246, 0.3) !important; color: #3b82f6 !important; }
+        .role-operador { background: rgba(147, 51, 234, 0.3) !important; color: #9333ea !important; }
+        .role-usuario { background: rgba(156, 163, 175, 0.3) !important; color: #9ca3af !important; }
+
+        /* Default color for unmapped roles */
+        .role-text:not(.role-super_admin):not(.role-administrador):not(.role-admin):not(.role-operador):not(.role-usuario) {
+            background: rgba(156, 163, 175, 0.3) !important;
+            color: #9ca3af !important;
         }
 
         @media (max-width: 768px) {
@@ -426,18 +455,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 </p>
             </div>
 
-            <?php if (hasPermission('admin_panel', $user_permissions, $user_role)): ?>
-            <!-- Admin Panel Card - Only for users with admin_panel permission -->
-            <div class="dashboard-card" onclick="window.location.href='admin-panel.php'" style="cursor: pointer;">
-                <h3 class="card-title">
-                    <i class="fas fa-users-cog"></i>
-                    Panel Administrativo
-                </h3>
-                <p class="card-description">
-                    Gestión completa de usuarios del sistema. Administra cuentas, asigna roles y controla permisos de acceso.
-                </p>
-            </div>
-            <?php endif; ?>
+
 
             <?php if (in_array($user_role, ['super_admin', 'administrador'])): ?>
             <!-- Promotions System Card - Only for administrators and super_admin -->
@@ -511,25 +529,6 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             });
         }
 
-        // Function to apply dynamic role color
-        function applyRoleColor(color) {
-            if (color) {
-                // Convert hex to rgba for background
-                const r = parseInt(color.slice(1, 3), 16);
-                const g = parseInt(color.slice(3, 5), 16);
-                const b = parseInt(color.slice(5, 7), 16);
-                const backgroundColor = `rgba(${r}, ${g}, ${b}, 0.3)`;
-
-                // Update all role badges in the page
-                const roleElements = document.querySelectorAll('.user-role-badge, .role-text');
-                roleElements.forEach(element => {
-                    element.style.backgroundColor = backgroundColor;
-                    element.style.color = color;
-                    element.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.5)`;
-                });
-            }
-        }
-
         // Real-time role update function
         function checkRoleUpdate() {
             fetch('api/get_user_role_update.php')
@@ -554,11 +553,6 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                             headerRole.textContent = data.role === 'super_admin' ? 'Desarrollador' : data.display_name;
                         }
 
-                        // Apply dynamic color
-                        if (data.role_color) {
-                            applyRoleColor(data.role_color);
-                        }
-
                         // Update rank image if exists
                         if (data.rank_image) {
                             const rankImages = document.querySelectorAll('.rank-image');
@@ -567,6 +561,9 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                                 img.style.display = 'block';
                             });
                         }
+
+                        // Apply role colors dynamically
+                        applyRoleColors(data.role);
                     }
                 })
                 .catch(error => {
@@ -577,11 +574,27 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
         // Check for role updates every 3 seconds
         setInterval(checkRoleUpdate, 3000);
 
-        // Apply initial role color if available
+        // Function to apply role colors based on role name
+        function applyRoleColors(roleName) {
+            const roleElements = document.querySelectorAll('.role-text, .user-role-badge');
+            
+            roleElements.forEach(element => {
+                // Remove all existing role classes
+                element.className = element.className.replace(/\brole-\S+/g, '');
+                
+                // Add the new role class
+                if (element.classList.contains('role-text')) {
+                    element.classList.add('role-text', 'role-' + roleName);
+                } else {
+                    element.classList.add('user-role-badge', 'role-' + roleName);
+                }
+            });
+        }
+
+        // Apply initial role color on page load
         document.addEventListener('DOMContentLoaded', function() {
-            <?php if (isset($rank_info['role_color']) && !empty($rank_info['role_color'])): ?>
-                applyRoleColor('<?php echo htmlspecialchars($rank_info['role_color']); ?>');
-            <?php endif; ?>
+            const currentRole = '<?php echo $user_role; ?>';
+            applyRoleColors(currentRole);
         });
     </script>
 </body>

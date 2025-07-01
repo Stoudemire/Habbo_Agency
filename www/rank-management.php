@@ -34,8 +34,9 @@ try {
     $user_permissions = [];
 }
 
-// Check if user has manage_roles permission
-$has_rank_permission = ($user['role'] === 'super_admin') || in_array('manage_roles', $user_permissions);
+// Check user permissions - only manage_roles permission needed
+$has_rank_permission = ($user['role'] === 'super_admin') || 
+                  in_array('manage_roles', $user_permissions);
 
 if (!$has_rank_permission) {
     header('Location: dashboard.php?error=access_denied');
@@ -50,7 +51,6 @@ $site_title = $config ? $config['site_title'] : 'Habbo Agency';
 
 // Define available permissions (only implemented features)
 $available_permissions = [
-    'admin_panel' => 'Panel Administrativo',
     'manage_roles' => 'Gestión de Rangos',
     'manage_config' => 'Configuración del Sistema',
     'manage_users' => 'Lista de Pagas',
@@ -69,47 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $level = intval($_POST['level']);
             $permissions = isset($_POST['permissions']) ? $_POST['permissions'] : [];
             $rank_image = null;
-            
-            // Auto-assign color for new rank
-            $predefined_colors = [
-                'creador' => '#9333ea',
-                'admin' => '#ef4444',
-                'administrador' => '#ef4444',
-                'operador' => '#3b82f6',
-                'usuario' => '#22c55e',
-                'super_admin' => '#ec4899'
-            ];
-            
-            $role_color = isset($predefined_colors[$rank_name]) ? $predefined_colors[$rank_name] : null;
-            
-            // If no predefined color, generate a unique one
-            if (!$role_color) {
-                $available_colors = [
-                    '#f59e0b', '#a855f7', '#14b8a6', '#f43f5e', '#d946ef', 
-                    '#6366f1', '#0ea5e9', '#9ca3af', '#fb923c', '#34d399',
-                    '#7c3aed', '#10b981', '#f97316', '#ec4899', '#3b82f6',
-                    '#4b5563', '#8b5cf6', '#0891b2', '#059669', '#dc2626',
-                    '#7c2d12', '#b91c1c', '#92400e', '#065f46', '#1e40af'
-                ];
-                
-                // Get already used colors
-                $stmt = $pdo->prepare("SELECT role_color FROM user_ranks WHERE role_color IS NOT NULL");
-                $stmt->execute();
-                $used_colors = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                
-                // Find first available color
-                foreach ($available_colors as $color) {
-                    if (!in_array($color, $used_colors)) {
-                        $role_color = $color;
-                        break;
-                    }
-                }
-                
-                // If all colors used, generate random one
-                if (!$role_color) {
-                    $role_color = sprintf('#%06X', mt_rand(0, 0xFFFFFF));
-                }
-            }
+
+
 
             $credits_time_hours = intval($_POST['credits_time_hours']);
             $credits_time_minutes = intval($_POST['credits_time_minutes']);
@@ -157,9 +118,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Create new rank
                     $permissions_json = json_encode($permissions);
                     try {
-                        // Try with rank_image and role_color columns first
-                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image, credits_time_hours, credits_time_minutes, credits_per_interval, role_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $role_color])) {
+                        // Try with rank_image column first
+                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image, credits_time_hours, credits_time_minutes, credits_per_interval) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval])) {
                             $success_message = "Rango creado exitosamente.";
                         } else {
                             $error_message = "Error al crear el rango.";
@@ -946,11 +907,7 @@ The code has been modified to include credit configuration options for each rank
                     <small style="color: rgba(255, 255, 255, 0.7); font-size: 0.9em; margin-top: 5px; display: block;">Formatos permitidos: JPG, PNG, GIF. Tamaño recomendado: 64x64px</small>
                 </div>
 
-                <div class="rank-form-group">
-                    <label for="role_color">Color del Rango:</label>
-                    <input type="color" id="role_color" name="role_color" value="#6b7280" style="width: 100%; height: 50px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 10px; background: rgba(255, 255, 255, 0.1); cursor: pointer;">
-                    <small style="color: rgba(255, 255, 255, 0.7); font-size: 0.9em; margin-top: 5px; display: block;">Elige un color único para este rango</small>
-                </div>
+
 
                  <div class="credits-config-group">
                     <h4>Configuración de Créditos</h4>

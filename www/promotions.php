@@ -1,4 +1,3 @@
-php
 <?php
 session_start();
 require_once 'config/database.php';
@@ -42,6 +41,8 @@ $site_title = $stmt->fetchColumn() ?: 'Habbo Agency';
 
 // Handle AJAX requests for getting fresh history data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_history') {
+    // Clean any output buffer
+    ob_clean();
     header('Content-Type: application/json');
 
     try {
@@ -69,6 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 
 // Handle AJAX requests for getting fresh user data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_users') {
+    // Clean any output buffer
+    ob_clean();
     header('Content-Type: application/json');
 
     try {
@@ -87,33 +90,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
         exit();
     }
-}
-
-// Check and fix database structure for custom ranks
-try {
-    // Check if role column is ENUM
-    $stmt = $pdo->prepare("DESCRIBE users");
-    $stmt->execute();
-    $columns = $stmt->fetchAll();
-
-    $role_is_enum = false;
-    foreach ($columns as $column) {
-        if ($column['Field'] === 'role' && strpos($column['Type'], 'enum') !== false) {
-            $role_is_enum = true;
-            break;
-        }
-    }
-
-    // If role is ENUM, convert to VARCHAR to allow custom ranks
-    if ($role_is_enum) {
-        try {
-            $pdo->exec("ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'usuario'");
-        } catch (Exception $e) {
-            // If ALTER fails, continue with existing structure
-        }
-    }
-} catch (Exception $e) {
-    // Continue if structure check fails
 }
 
 // Get all available ranks from database
@@ -143,7 +119,8 @@ try {
 
 // Handle promotion action
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    // Always return JSON for AJAX requests
+    // Clean any output buffer and return JSON for AJAX requests
+    ob_clean();
     header('Content-Type: application/json');
 
     if ($_POST['action'] === 'promote_user') {
@@ -315,7 +292,6 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Ascensos - <?php echo htmlspecialchars($site_title); ?></title>
     <link rel="stylesheet" href="assets/css/styles.css">
-    <link rel="stylesheet" href="assets/css/dynamic-roles.php">
     <link rel="stylesheet" href="assets/css/notifications.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -426,28 +402,23 @@ try {
             text-transform: uppercase;
         }
 
-        .role-usuario { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
-        .role-operador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
-        .role-administrador { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
-        .role-super_admin { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
-        .role-creador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
-        .role-admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
-
-        /* Extended colors for custom roles */
-        .role-moderador { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
-        .role-supervisor { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
-        .role-coordinador { background: rgba(20, 184, 166, 0.3); color: #14b8a6; }
-        .role-jefe { background: rgba(244, 63, 94, 0.3); color: #f43f5e; }
-        .role-gerente { background: rgba(217, 70, 239, 0.3); color: #d946ef; }
-        .role-director { background: rgba(99, 102, 241, 0.3); color: #6366f1; }
-        .role-encargado { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
-        .role-asistente { background: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
-        .role-analista { background: rgba(156, 163, 175, 0.3); color: #9ca3af; }
-        .role-especialista { background: rgba(251, 146, 60, 0.3); color: #fb923c; }
-        .role-consultor { background: rgba(52, 211, 153, 0.3); color: #34d399; }
-        .role-tecnico { background: rgba(124, 58, 237, 0.3); color: #7c3aed; }
-        .role-desarrollador { background: rgba(16, 185, 129, 0.3); color: #10b981; }
-        .role-diseñador { background: rgba(249, 115, 22, 0.3); color: #f97316; }
+        /* Static role colors */
+        .role-super_admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+        .role-administrador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+        .role-admin { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+        .role-operador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
+        
+        /* All other roles get gray color */
+        .user-role-badge {
+            background: rgba(156, 163, 175, 0.3);
+            color: #9ca3af;
+        }
+        
+        /* Override for specific roles */
+        .user-role-badge.role-super_admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+        .user-role-badge.role-administrador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+        .user-role-badge.role-admin { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+        .user-role-badge.role-operador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
 
         .action-btn {
             background: linear-gradient(45deg, #9c27b0, #673ab7);
