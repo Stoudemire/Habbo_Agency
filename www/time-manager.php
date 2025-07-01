@@ -634,7 +634,21 @@ $current_user = $_SESSION['username'];
                                 }
                                 ?>
                                 <tr>
-                                    <td><?php echo htmlspecialchars($session['username']); ?></td>
+                                    <td>
+                                        <div class="user-info">
+                                            <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($session['username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
+                                                 alt="Avatar de <?php echo htmlspecialchars($session['username']); ?>" 
+                                                 class="user-avatar"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                            <div class="user-avatar-placeholder" style="display: none;">
+                                                <?php echo strtoupper(substr($session['username'], 0, 1)); ?>
+                                            </div>
+                                            <div class="user-details">
+                                                <h4><?php echo htmlspecialchars($session['username']); ?></h4>
+                                                <p>Habbo: <?php echo htmlspecialchars($session['username']); ?></p>
+                                            </div>
+                                        </div>
+                                    </td>
                                     <?php if ($can_manage_timers): ?>
                                     <td><?php echo htmlspecialchars($session['description'] ?: 'Sin descripción'); ?></td>
                                     <?php endif; ?>

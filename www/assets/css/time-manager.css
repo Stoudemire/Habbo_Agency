@@ -38,6 +38,48 @@
 
 /* Notification styles removed - now using global notification system */
 
+/* User info styling for sessions table */
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-avatar {
+    width: 70px;
+    height: 70px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
+}
+
+.user-avatar-placeholder {
+    width: 70px;
+    height: 70px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+.user-details h4 {
+    margin: 0;
+    font-size: 0.9em;
+    color: white;
+    font-weight: 600;
+}
+
+.user-details p {
+    margin: 0;
+    font-size: 0.75em;
+    color: rgba(255, 255, 255, 0.7);
+}
+
 /* Session table styles */
 .sessions-table {
     width: 100%;
