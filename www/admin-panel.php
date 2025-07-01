@@ -58,12 +58,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             exit();
             
         case 'update_user':
-            $user_id = $_POST['user_id'];
-            $role = $_POST['role'];
+            $user_id = intval($_POST['user_id']);
+            $new_role = trim($_POST['role']);
             
-            $stmt = $pdo->prepare("UPDATE users SET role = ? WHERE id = ?");
-            $success = $stmt->execute([$role, $user_id]);
-            echo json_encode(['success' => $success, 'message' => $success ? 'Usuario actualizado' : 'Error al actualizar']);
+            // Validate role
+            $valid_roles = ['usuario', 'operador', 'administrador'];
+            if ($user_role === 'super_admin') {
+                $valid_roles[] = 'super_admin';
+            }
+            
+            if (!in_array($new_role, $valid_roles)) {
+                echo json_encode(['success' => false, 'message' => 'Rol no válido']);
+                exit();
+            }
+            
+            // Check permissions hierarchy
+            $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
+            $current_user_level = $role_hierarchy[$user_role] ?? 0;
+            $new_role_level = $role_hierarchy[$new_role] ?? 0;
+            
+            if ($new_role_level >= $current_user_level && $user_role !== 'super_admin') {
+                echo json_encode(['success' => false, 'message' => 'No puedes asignar un rol igual o superior al tuyo']);
+                exit();
+            }
+            
+            try {
+                $pdo->beginTransaction();
+                
+                // Get current user info
+                $stmt = $pdo->prepare("SELECT habbo_username, role FROM users WHERE id = ?");
+                $stmt->execute([$user_id]);
+                $target_user = $stmt->fetch();
+                
+                if (!$target_user) {
+                    echo json_encode(['success' => false, 'message' => 'Usuario no encontrado']);
+                    exit();
+                }
+                
+                // Update user role
+                $stmt = $pdo->prepare("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+                $success = $stmt->execute([$new_role, $user_id]);
+                
+                if ($success) {
+                    // Clear any cached session data for this user by forcing a session refresh
+                    // We'll create a simple session invalidation table
+                    try {
+                        $pdo->exec("
+                            CREATE TABLE IF NOT EXISTS session_invalidations (
+                                user_id INT PRIMARY KEY,
+                                invalidated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                            )
+                        ");
+                        
+                        $stmt = $pdo->prepare("INSERT INTO session_invalidations (user_id) VALUES (?) ON DUPLICATE KEY UPDATE invalidated_at = CURRENT_TIMESTAMP");
+                        $stmt->execute([$user_id]);
+                    } catch (Exception $e) {
+                        // Table creation failed, continue anyway
+                    }
+                    
+                    $pdo->commit();
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => "Usuario '{$target_user['habbo_username']}' actualizado de '{$target_user['role']}' a '{$new_role}'. Los cambios se aplicarán en el próximo inicio de sesión.",
+                        'updated_user' => $target_user['habbo_username']
+                    ]);
+                } else {
+                    $pdo->rollBack();
+                    echo json_encode(['success' => false, 'message' => 'Error al actualizar el usuario']);
+                }
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => 'Error de base de datos: ' . $e->getMessage()]);
+            }
             exit();
             
         case 'delete_user':
@@ -444,12 +512,14 @@ $current_user = $_SESSION['username'];
                 const result = await response.json();
                 
                 if (result.success) {
-                    alert('Usuario actualizado correctamente');
+                    alert(result.message || 'Usuario actualizado correctamente');
+                    closeModal();
                     location.reload();
                 } else {
-                    alert(result.message);
+                    alert(result.message || 'Error al actualizar usuario');
                 }
             } catch (error) {
+                console.error('Error:', error);
                 alert('Error de conexión');
             }
         });

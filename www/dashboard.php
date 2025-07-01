@@ -36,6 +36,25 @@ if (isset($_GET['logout'])) {
     exit();
 }
 
+// Check if user session has been invalidated (for role updates)
+try {
+    $stmt_check = $pdo->prepare("SELECT invalidated_at FROM session_invalidations WHERE user_id = ?");
+    $stmt_check->execute([$_SESSION['user_id']]);
+    $invalidation = $stmt_check->fetch();
+    
+    if ($invalidation && (!isset($_SESSION['last_validated']) || $_SESSION['last_validated'] < $invalidation['invalidated_at'])) {
+        // Session has been invalidated, force refresh user data
+        unset($_SESSION['user_data']);
+        $_SESSION['last_validated'] = date('Y-m-d H:i:s');
+        
+        // Remove invalidation record
+        $stmt_remove = $pdo->prepare("DELETE FROM session_invalidations WHERE user_id = ?");
+        $stmt_remove->execute([$_SESSION['user_id']]);
+    }
+} catch (Exception $e) {
+    // Table might not exist yet, continue
+}
+
 // Get user data including role with session caching
 if (!isset($_SESSION['user_data'])) {
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
@@ -419,6 +438,19 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                 </h3>
                 <p class="card-description">
                     Gestión completa de usuarios del sistema. Administra cuentas, asigna roles y controla permisos de acceso.
+                </p>
+            </div>
+            <?php endif; ?>
+
+            <?php if (in_array($user_role, ['super_admin', 'administrador'])): ?>
+            <!-- Promotions System Card - Only for administrators and super_admin -->
+            <div class="dashboard-card" onclick="window.location.href='promotions.php'" style="cursor: pointer;">
+                <h3 class="card-title">
+                    <i class="fas fa-level-up-alt"></i>
+                    Sistema de Ascensos
+                </h3>
+                <p class="card-description">
+                    Ascender usuarios entre rangos. Promueve empleados de usuario a operador, o de operador a administrador según su desempeño.
                 </p>
             </div>
             <?php endif; ?>
