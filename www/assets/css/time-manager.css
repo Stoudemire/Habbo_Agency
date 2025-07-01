@@ -144,6 +144,42 @@
     letter-spacing: 0.05em;
 }
 
+/* Role color badges for time manager */
+.role-usuario { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+.role-operador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+.role-administrador { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+.role-super_admin { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+.role-creador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
+.role-admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+
+/* Extended colors for custom roles */
+.role-moderador { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
+.role-supervisor { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
+.role-coordinador { background: rgba(20, 184, 166, 0.3); color: #14b8a6; }
+.role-jefe { background: rgba(244, 63, 94, 0.3); color: #f43f5e; }
+.role-gerente { background: rgba(217, 70, 239, 0.3); color: #d946ef; }
+.role-director { background: rgba(99, 102, 241, 0.3); color: #6366f1; }
+.role-encargado { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+.role-asistente { background: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
+.role-analista { background: rgba(156, 163, 175, 0.3); color: #9ca3af; }
+.role-especialista { background: rgba(251, 146, 60, 0.3); color: #fb923c; }
+.role-consultor { background: rgba(52, 211, 153, 0.3); color: #34d399; }
+.role-tecnico { background: rgba(124, 58, 237, 0.3); color: #7c3aed; }
+.role-desarrollador { background: rgba(16, 185, 129, 0.3); color: #10b981; }
+.role-diseñador { background: rgba(249, 115, 22, 0.3); color: #f97316; }
+.role-marketing { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+.role-ventas { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+.role-soporte { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+.role-recursos_humanos { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
+.role-finanzas { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
+.role-legal { background: rgba(75, 85, 99, 0.3); color: #4b5563; }
+.role-calidad { background: rgba(20, 184, 166, 0.3); color: #14b8a6; }
+.role-investigacion { background: rgba(139, 92, 246, 0.3); color: #8b5cf6; }
+.role-producto { background: rgba(244, 63, 94, 0.3); color: #f43f5e; }
+.role-operaciones { background: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
+.role-seguridad { background: rgba(127, 29, 29, 0.3); color: #7f1d1d; }
+.role-comunicacion { background: rgba(217, 70, 239, 0.3); color: #d946ef; }
+
 .status-active {
     background: rgba(34, 197, 94, 0.2);
     border: 1px solid rgba(34, 197, 94, 0.4);

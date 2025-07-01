@@ -41,12 +41,12 @@ try {
     $stmt_check = $pdo->prepare("SELECT invalidated_at FROM session_invalidations WHERE user_id = ?");
     $stmt_check->execute([$_SESSION['user_id']]);
     $invalidation = $stmt_check->fetch();
-    
+
     if ($invalidation && (!isset($_SESSION['last_validated']) || $_SESSION['last_validated'] < $invalidation['invalidated_at'])) {
         // Session has been invalidated, force refresh user data
         unset($_SESSION['user_data']);
         $_SESSION['last_validated'] = date('Y-m-d H:i:s');
-        
+
         // Remove invalidation record
         $stmt_remove = $pdo->prepare("DELETE FROM session_invalidations WHERE user_id = ?");
         $stmt_remove->execute([$_SESSION['user_id']]);
@@ -55,22 +55,19 @@ try {
     // Table might not exist yet, continue
 }
 
-// Get user data including role with session caching
-if (!isset($_SESSION['user_data'])) {
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $user = $stmt->fetch();
+// Always fetch fresh user data to get real-time role updates
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$user = $stmt->fetch();
 
-    if (!$user) {
-        session_destroy();
-        header('Location: index.php');
-        exit();
-    }
-
-    $_SESSION['user_data'] = $user;
-} else {
-    $user = $_SESSION['user_data'];
+if (!$user) {
+    session_destroy();
+    header('Location: index.php');
+    exit();
 }
+
+// Update session data with fresh user info
+$_SESSION['user_data'] = $user;
 
 $username = $user['username'];
 $user_role = $user['role'];
@@ -514,7 +511,78 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             });
         }
 
+        // Function to apply dynamic role color
+        function applyRoleColor(color) {
+            if (color) {
+                // Convert hex to rgba for background
+                const r = parseInt(color.slice(1, 3), 16);
+                const g = parseInt(color.slice(3, 5), 16);
+                const b = parseInt(color.slice(5, 7), 16);
+                const backgroundColor = `rgba(${r}, ${g}, ${b}, 0.3)`;
 
+                // Update all role badges in the page
+                const roleElements = document.querySelectorAll('.user-role-badge, .role-text');
+                roleElements.forEach(element => {
+                    element.style.backgroundColor = backgroundColor;
+                    element.style.color = color;
+                    element.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.5)`;
+                });
+            }
+        }
+
+        // Real-time role update function
+        function checkRoleUpdate() {
+            fetch('api/get_user_role_update.php')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update role display
+                        const roleTextElements = document.querySelectorAll('.role-text');
+                        roleTextElements.forEach(element => {
+                            element.textContent = data.display_name;
+                        });
+
+                        // Update rank title
+                        const rankTitle = document.querySelector('.rank-title');
+                        if (rankTitle) {
+                            rankTitle.textContent = data.display_name;
+                        }
+
+                        // Update header role
+                        const headerRole = document.querySelector('.user-details p');
+                        if (headerRole) {
+                            headerRole.textContent = data.role === 'super_admin' ? 'Desarrollador' : data.display_name;
+                        }
+
+                        // Apply dynamic color
+                        if (data.role_color) {
+                            applyRoleColor(data.role_color);
+                        }
+
+                        // Update rank image if exists
+                        if (data.rank_image) {
+                            const rankImages = document.querySelectorAll('.rank-image');
+                            rankImages.forEach(img => {
+                                img.src = data.rank_image;
+                                img.style.display = 'block';
+                            });
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('Role update check failed:', error);
+                });
+        }
+
+        // Check for role updates every 3 seconds
+        setInterval(checkRoleUpdate, 3000);
+
+        // Apply initial role color if available
+        document.addEventListener('DOMContentLoaded', function() {
+            <?php if (isset($rank_info['role_color']) && !empty($rank_info['role_color'])): ?>
+                applyRoleColor('<?php echo htmlspecialchars($rank_info['role_color']); ?>');
+            <?php endif; ?>
+        });
     </script>
 </body>
 </html>

@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS user_ranks (
     level INT NOT NULL DEFAULT 1,
     permissions TEXT,
     rank_image VARCHAR(255) DEFAULT NULL,
+    credits_time_hours INT DEFAULT 1,
+    credits_time_minutes INT DEFAULT 0,
+    credits_per_interval INT DEFAULT 1,
+    role_color VARCHAR(7) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

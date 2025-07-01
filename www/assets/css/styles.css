@@ -963,3 +963,55 @@ body {
         min-width: auto;
     }
 }
+
+/* Dynamic role colors - will be applied via JavaScript */
+        .user-role-badge, .role-text {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        /* Fallback for roles without database color */
+        .user-role-badge:not([style*="background"]),
+        .role-text:not([style*="background"]) {
+            background: rgba(107, 114, 128, 0.3);
+            color: #6b7280;
+        } }
+
+        /* Extended color palette for custom roles */
+        .role-moderador { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
+        .role-supervisor { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
+        .role-coordinador { background: rgba(20, 184, 166, 0.3); color: #14b8a6; }
+        .role-jefe { background: rgba(244, 63, 94, 0.3); color: #f43f5e; }
+        .role-gerente { background: rgba(217, 70, 239, 0.3); color: #d946ef; }
+        .role-director { background: rgba(99, 102, 241, 0.3); color: #6366f1; }
+        .role-encargado { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+        .role-asistente { background: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
+        .role-analista { background: rgba(156, 163, 175, 0.3); color: #9ca3af; }
+        .role-especialista { background: rgba(251, 146, 60, 0.3); color: #fb923c; }
+        .role-consultor { background: rgba(52, 211, 153, 0.3); color: #34d399; }
+        .role-tecnico { background: rgba(124, 58, 237, 0.3); color: #7c3aed; }
+        .role-desarrollador { background: rgba(16, 185, 129, 0.3); color: #10b981; }
+        .role-diseñador { background: rgba(249, 115, 22, 0.3); color: #f97316; }
+        .role-test { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+        .role-vip { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
+        .role-premium { background: rgba(251, 191, 36, 0.3); color: #fbbf24; }
+        .role-elite { background: rgba(139, 92, 246, 0.3); color: #8b5cf6; }
+        .role-legend { background: rgba(245, 101, 101, 0.3); color: #f56565; }
+        .role-champion { background: rgba(72, 187, 120, 0.3); color: #48bb78; }
+        .role-master { background: rgba(99, 179, 237, 0.3); color: #63b3ed; }
+        .role-guardian { background: rgba(128, 90, 213, 0.3); color: #805ad5; }
+        .role-knight { background: rgba(113, 128, 150, 0.3); color: #718096; }
+        .role-scout { background: rgba(56, 178, 172, 0.3); color: #38b2ac; }
+        .role-cacarol { background: rgba(255, 159, 64, 0.3); color: #ff9f40; }
+
+        /* Fallback colors for any unmapped roles */
+        .user-role-badge:not([class*="role-"]) { 
+            background: rgba(107, 114, 128, 0.3); 
+            color: #6b7280; 
+        }

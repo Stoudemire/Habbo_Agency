@@ -1,4 +1,4 @@
-
+php
 <?php
 session_start();
 require_once 'config/database.php';
@@ -43,7 +43,7 @@ $site_title = $stmt->fetchColumn() ?: 'Habbo Agency';
 // Handle AJAX requests for getting fresh history data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_history') {
     header('Content-Type: application/json');
-    
+
     try {
         $stmt = $pdo->prepare("
             SELECT pl.*, 
@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         ");
         $stmt->execute();
         $history_data = $stmt->fetchAll();
-        
+
         echo json_encode(['success' => true, 'history' => $history_data]);
         exit();
     } catch (Exception $e) {
@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 // Handle AJAX requests for getting fresh user data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_users') {
     header('Content-Type: application/json');
-    
+
     try {
         if ($user_role === 'super_admin') {
             $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username LIMIT 5");
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             $stmt->execute([$_SESSION['user_id']]);
         }
         $users_data = $stmt->fetchAll();
-        
+
         echo json_encode(['success' => true, 'users' => $users_data]);
         exit();
     } catch (Exception $e) {
@@ -95,7 +95,7 @@ try {
     $stmt = $pdo->prepare("DESCRIBE users");
     $stmt->execute();
     $columns = $stmt->fetchAll();
-    
+
     $role_is_enum = false;
     foreach ($columns as $column) {
         if ($column['Field'] === 'role' && strpos($column['Type'], 'enum') !== false) {
@@ -103,7 +103,7 @@ try {
             break;
         }
     }
-    
+
     // If role is ENUM, convert to VARCHAR to allow custom ranks
     if ($role_is_enum) {
         try {
@@ -127,7 +127,7 @@ try {
     }
     $stmt->execute();
     $ranks_data = $stmt->fetchAll();
-    
+
     foreach ($ranks_data as $rank) {
         $available_ranks[] = $rank['rank_name'];
         $rank_hierarchy[$rank['rank_name']] = $rank['level'];
@@ -145,7 +145,7 @@ try {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // Always return JSON for AJAX requests
     header('Content-Type: application/json');
-    
+
     if ($_POST['action'] === 'promote_user') {
         try {
             $target_user_id = intval($_POST['user_id']);
@@ -158,10 +158,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $target_stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
                 $target_stmt->execute([$target_user_id]);
                 $current_role = $target_stmt->fetchColumn();
-                
+
                 $current_level = $rank_hierarchy[$current_role] ?? 0;
                 $new_level = $rank_hierarchy[$new_role] ?? 0;
-                
+
                 if ($new_level > $current_level) {
                     $promotion_reason = "Ascenso por buen desempeño y cumplimiento de responsabilidades";
                 } else {
@@ -259,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             $pdo->commit();
-            
+
             echo json_encode([
                 'success' => true,
                 'message' => "Usuario '{$target_user['habbo_username']}' modificado exitosamente de '{$target_user['role']}' a '{$new_role}'.",
@@ -315,6 +315,7 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Ascensos - <?php echo htmlspecialchars($site_title); ?></title>
     <link rel="stylesheet" href="assets/css/styles.css">
+    <link rel="stylesheet" href="assets/css/dynamic-roles.php">
     <link rel="stylesheet" href="assets/css/notifications.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -429,6 +430,24 @@ try {
         .role-operador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
         .role-administrador { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
         .role-super_admin { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+        .role-creador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
+        .role-admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+
+        /* Extended colors for custom roles */
+        .role-moderador { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
+        .role-supervisor { background: rgba(168, 85, 247, 0.3); color: #a855f7; }
+        .role-coordinador { background: rgba(20, 184, 166, 0.3); color: #14b8a6; }
+        .role-jefe { background: rgba(244, 63, 94, 0.3); color: #f43f5e; }
+        .role-gerente { background: rgba(217, 70, 239, 0.3); color: #d946ef; }
+        .role-director { background: rgba(99, 102, 241, 0.3); color: #6366f1; }
+        .role-encargado { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+        .role-asistente { background: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
+        .role-analista { background: rgba(156, 163, 175, 0.3); color: #9ca3af; }
+        .role-especialista { background: rgba(251, 146, 60, 0.3); color: #fb923c; }
+        .role-consultor { background: rgba(52, 211, 153, 0.3); color: #34d399; }
+        .role-tecnico { background: rgba(124, 58, 237, 0.3); color: #7c3aed; }
+        .role-desarrollador { background: rgba(16, 185, 129, 0.3); color: #10b981; }
+        .role-diseñador { background: rgba(249, 115, 22, 0.3); color: #f97316; }
 
         .action-btn {
             background: linear-gradient(45deg, #9c27b0, #673ab7);
@@ -697,20 +716,20 @@ try {
             .promotions-container {
                 gap: 20px;
             }
-            
+
             .users-table-container {
                 height: 400px;
             }
-            
+
             .table-scroll {
                 height: 330px;
                 max-height: 330px;
             }
-            
+
             .history-container {
                 height: 400px;
             }
-            
+
             .history-scroll {
                 height: 260px;
                 max-height: 260px;
@@ -748,7 +767,7 @@ try {
                         </div>
                     </div>
 
-                    <!-- Users Table -->
+                    <!-- Users Table Container -->
                     <div class="users-table-container">
                         <div class="table-header">
                             <h3 class="card-title">
@@ -817,7 +836,7 @@ try {
                             Historial de Cambios
                         </h3>
                         <input type="text" id="historySearch" class="history-search" placeholder="Buscar en historial...">
-                        
+
                         <div class="history-scroll" id="historyContainer">
                             <?php foreach ($recent_promotions as $promotion): ?>
                                 <div class="history-item" data-username="<?php echo htmlspecialchars($promotion['promoted_username'] ?? ''); ?>" data-promoter="<?php echo htmlspecialchars($promotion['promoter_username'] ?? ''); ?>" data-reason="<?php echo htmlspecialchars($promotion['reason'] ?? ''); ?>">
@@ -967,7 +986,7 @@ try {
         document.getElementById('userSearch').addEventListener('input', function() {
             const searchTerm = this.value.toLowerCase();
             const rows = document.querySelectorAll('#usersTableBody tr');
-            
+
             rows.forEach(row => {
                 const username = row.dataset.username.toLowerCase();
                 if (username.includes(searchTerm)) {
@@ -982,12 +1001,12 @@ try {
         document.getElementById('historySearch').addEventListener('input', function() {
             const searchTerm = this.value.toLowerCase();
             const items = document.querySelectorAll('.history-item');
-            
+
             items.forEach(item => {
                 const username = (item.dataset.username || '').toLowerCase();
                 const promoter = (item.dataset.promoter || '').toLowerCase();
                 const reason = (item.dataset.reason || '').toLowerCase();
-                
+
                 if (username.includes(searchTerm) || promoter.includes(searchTerm) || reason.includes(searchTerm)) {
                     item.style.display = '';
                 } else {
@@ -998,10 +1017,10 @@ try {
 
         function openPromotionModal(userId, username, currentRole) {
             currentModalUser = { id: userId, username: username, role: currentRole };
-            
+
             document.getElementById('modalUserId').value = userId;
             document.getElementById('modalUserName').textContent = username;
-            
+
             // Set avatar image
             const avatarImg = document.getElementById('modalUserAvatarImg');
             const avatarFallback = document.getElementById('modalUserAvatar');
@@ -1009,16 +1028,16 @@ try {
             avatarImg.style.display = 'block';
             avatarFallback.style.display = 'none';
             avatarFallback.textContent = username.charAt(0).toUpperCase();
-            
+
             document.getElementById('modalCurrentRole').textContent = `Rol actual: ${currentRole.charAt(0).toUpperCase() + currentRole.slice(1)}`;
-            
+
             // Reset form
             selectedModalRole = null;
             document.getElementById('modalSelectedRole').value = '';
             document.querySelectorAll('.role-card').forEach(card => {
                 card.classList.remove('selected', 'disabled');
             });
-            
+
             // Disable current role
             const currentRoleCard = document.querySelector(`[data-role="${currentRole}"]`);
             if (currentRoleCard) {
@@ -1027,7 +1046,7 @@ try {
 
             // Reset reason type
             selectReasonType('automatic');
-            
+
             document.getElementById('promotionModal').style.display = 'flex';
         }
 
@@ -1039,14 +1058,14 @@ try {
 
         function selectModalRole(role) {
             if (currentModalUser && role === currentModalUser.role) return;
-            
+
             const roleCard = document.querySelector(`[data-role="${role}"]`);
             if (roleCard.classList.contains('disabled')) return;
-            
+
             document.querySelectorAll('.role-card').forEach(card => {
                 card.classList.remove('selected');
             });
-            
+
             roleCard.classList.add('selected');
             selectedModalRole = role;
             document.getElementById('modalSelectedRole').value = role;
@@ -1055,12 +1074,12 @@ try {
         function selectReasonType(type) {
             currentReasonType = type;
             document.getElementById('modalReasonType').value = type;
-            
+
             // Update buttons
             document.querySelectorAll('.reason-type-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            
+
             if (type === 'automatic') {
                 document.getElementById('autoReasonBtn').classList.add('active');
                 document.getElementById('manualReasonContainer').classList.remove('show');
@@ -1073,25 +1092,25 @@ try {
         // Form submission (simplified and fixed)
         document.getElementById('promotionForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             if (!selectedModalRole) {
                 showNotification('Por favor selecciona un nuevo rol.', 'error');
                 return;
             }
-            
+
             if (currentReasonType === 'manual' && !document.getElementById('modalReason').value.trim()) {
                 showNotification('Por favor proporciona un motivo personalizado.', 'error');
                 return;
             }
-            
+
             const formData = new FormData(this);
-            
+
             // Disable submit button to prevent double submission
             const submitBtn = this.querySelector('button[type="submit"]');
             const originalText = submitBtn.innerHTML;
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
-            
+
             fetch('promotions.php', {
                 method: 'POST',
                 body: formData
@@ -1106,10 +1125,10 @@ try {
                 if (data.success) {
                     showNotification(data.message, 'success');
                     closePromotionModal();
-                    
+
                     // Update table row in real time
                     updateUserTableRow(data.user_id, data.new_role);
-                    
+
                     // Refresh both users and history sections immediately
                     setTimeout(() => {
                         refreshUsersTable();
@@ -1147,7 +1166,7 @@ try {
                     roleBadge.className = `user-role-badge role-${newRole}`;
                     roleBadge.textContent = newRole.charAt(0).toUpperCase() + newRole.slice(1);
                 }
-                
+
                 // Update onclick attribute
                 const actionBtn = row.querySelector('.action-btn');
                 if (actionBtn && currentModalUser) {
@@ -1165,7 +1184,7 @@ try {
                     if (data.success && data.users) {
                         const tbody = document.getElementById('usersTableBody');
                         tbody.innerHTML = '';
-                        
+
                         data.users.forEach(user => {
                             const row = createUserTableRow(user);
                             tbody.appendChild(row);
@@ -1185,7 +1204,7 @@ try {
                     if (data.success && data.history) {
                         const historyContainer = document.getElementById('historyContainer');
                         historyContainer.innerHTML = '';
-                        
+
                         data.history.forEach(promotion => {
                             const historyItem = createHistoryItem(promotion);
                             historyContainer.appendChild(historyItem);
@@ -1202,10 +1221,10 @@ try {
             const tr = document.createElement('tr');
             tr.setAttribute('data-user-id', user.id);
             tr.setAttribute('data-username', user.habbo_username);
-            
+
             const userInitial = user.habbo_username.charAt(0).toUpperCase();
             const createdAt = new Date(user.created_at).toLocaleDateString('es-ES');
-            
+
             tr.innerHTML = `
                 <td>
                     <div style="display: flex; align-items: center; gap: 15px;">
@@ -1240,7 +1259,7 @@ try {
                     </button>
                 </td>
             `;
-            
+
             return tr;
         }
 
@@ -1251,13 +1270,13 @@ try {
             div.setAttribute('data-username', promotion.promoted_username || '');
             div.setAttribute('data-promoter', promotion.promoter_username || '');
             div.setAttribute('data-reason', promotion.reason || '');
-            
+
             const userInitial = promotion.promoted_username ? promotion.promoted_username.charAt(0).toUpperCase() : 'U';
             const promotedUsername = promotion.promoted_username || 'Usuario eliminado';
             const promoterUsername = promotion.promoter_username || 'Usuario eliminado';
             const createdAt = new Date(promotion.created_at).toLocaleDateString('es-ES') + ' ' + 
                               new Date(promotion.created_at).toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'});
-            
+
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                     <div style="display: flex; align-items: center; gap: 15px;">
@@ -1300,7 +1319,7 @@ try {
                     </div>
                 ` : ''}
             `;
-            
+
             return div;
         }
 

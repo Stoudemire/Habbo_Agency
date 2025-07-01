@@ -216,6 +216,9 @@ $current_user = $_SESSION['username'];
         }
         
         .role-desarrollador { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+        .role-super_admin { background: rgba(236, 72, 153, 0.3); color: #ec4899; }
+        .role-creador { background: rgba(147, 51, 234, 0.3); color: #9333ea; }
+        .role-admin { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
         .role-administrador { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
         .role-operador { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
         .role-usuario { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
