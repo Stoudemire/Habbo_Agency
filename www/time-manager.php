@@ -21,12 +21,31 @@ if (!isset($_SESSION['user_role'])) {
 $user_role = $_SESSION['user_role'];
 
 // Get credits configuration with static caching
-static $credits_per_minute = null;
-if ($credits_per_minute === null) {
-    $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key = 'credits_per_minute'");
+static $credits_config = null;
+if ($credits_config === null) {
+    $stmt = $pdo->prepare("SELECT config_key, config_value FROM system_config WHERE config_key IN ('credits_calculation_type', 'credits_per_minute', 'time_hours', 'time_minutes', 'credits_per_interval')");
     $stmt->execute();
-    $credits_per_minute = intval($stmt->fetchColumn() ?: 1); // Default: 1 credit per minute
+    $config_data = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    
+    $credits_config = [
+        'calculation_type' => $config_data['credits_calculation_type'] ?? 'minute',
+        'credits_per_minute' => intval($config_data['credits_per_minute'] ?? 1),
+        'time_hours' => intval($config_data['time_hours'] ?? 1),
+        'time_minutes' => intval($config_data['time_minutes'] ?? 0),
+        'credits_per_interval' => intval($config_data['credits_per_interval'] ?? 1)
+    ];
+    
+    // Calculate effective credits per minute based on configuration
+    if ($credits_config['calculation_type'] === 'hour') {
+        $total_minutes = ($credits_config['time_hours'] * 60) + $credits_config['time_minutes'];
+        if ($total_minutes <= 0) $total_minutes = 60; // Default to 1 hour
+        $credits_config['effective_credits_per_minute'] = $credits_config['credits_per_interval'] / $total_minutes;
+    } else {
+        $credits_config['effective_credits_per_minute'] = $credits_config['credits_per_minute'];
+    }
 }
+
+$credits_per_minute = $credits_config['effective_credits_per_minute'];
 
 // Define what interface to show based on role
 $can_manage_timers = in_array($user_role, ['super_admin', 'desarrollador', 'administrador', 'operador']);
@@ -70,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 $total_seconds += $elapsed;
             }
             $session['current_total'] = $total_seconds;
-            // Calculate credits earned (total minutes * credits per minute)
+            // Calculate credits earned using the configured system
             $total_minutes = $total_seconds / 60;
             $session['credits_earned'] = round($total_minutes * $credits_per_minute);
         }
@@ -711,6 +730,7 @@ $current_user = $_SESSION['username'];
         window.canManageTimers = <?php echo json_encode($can_manage_timers); ?>;
         window.userRole = <?php echo json_encode($user_role); ?>;
         window.creditsPerMinute = <?php echo json_encode($credits_per_minute); ?>;
+        window.creditsConfig = <?php echo json_encode($credits_config); ?>;
         window.currentUserId = <?php echo json_encode($_SESSION['user_id']); ?>;
         window.currentUsername = <?php echo json_encode($_SESSION['username']); ?>;
         

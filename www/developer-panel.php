@@ -113,19 +113,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Handle credits configuration update
     if (isset($_POST['credits_calculation_type'])) {
         $calculation_type = $_POST['credits_calculation_type'];
-        $credits_per_hour = 0;
-        $credits_per_minute = 0;
-        
-        if ($calculation_type === 'hour' && isset($_POST['credits_per_hour']) && is_numeric($_POST['credits_per_hour'])) {
-            $credits_per_hour = intval($_POST['credits_per_hour']);
-            $credits_per_minute = $credits_per_hour; // Save the same value for both
-        } elseif ($calculation_type === 'minute' && isset($_POST['credits_per_minute']) && is_numeric($_POST['credits_per_minute'])) {
-            $credits_per_minute = intval($_POST['credits_per_minute']);
-            $credits_per_hour = $credits_per_minute; // Save the same value for both
-        }
         
         try {
-            // Update or insert calculation type
+            // Save calculation type
             $stmt = $pdo->prepare("SELECT config_key FROM system_config WHERE config_key = 'credits_calculation_type'");
             $stmt->execute();
             
@@ -137,28 +127,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$calculation_type]);
             }
             
-            // Update or insert credits_per_hour
-            $stmt = $pdo->prepare("SELECT config_key FROM system_config WHERE config_key = 'credits_per_hour'");
-            $stmt->execute();
-            
-            if ($stmt->rowCount() > 0) {
-                $stmt = $pdo->prepare("UPDATE system_config SET config_value = ? WHERE config_key = 'credits_per_hour'");
-                $stmt->execute([$credits_per_hour]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO system_config (config_key, config_value) VALUES ('credits_per_hour', ?)");
-                $stmt->execute([$credits_per_hour]);
+            if ($calculation_type === 'hour') {
+                // Handle time-based configuration
+                $time_hours = isset($_POST['time_hours']) ? intval($_POST['time_hours']) : 1;
+                $time_minutes = isset($_POST['time_minutes']) ? intval($_POST['time_minutes']) : 0;
+                $credits_per_interval = isset($_POST['credits_per_interval']) ? intval($_POST['credits_per_interval']) : 1;
+                
+                // Convert total time to minutes for calculation
+                $total_minutes = ($time_hours * 60) + $time_minutes;
+                if ($total_minutes <= 0) $total_minutes = 60; // Default to 1 hour if invalid
+                
+                // Calculate credits per minute based on interval
+                $credits_per_minute = $credits_per_interval / $total_minutes;
+                
+                // Save all time configuration values
+                $time_configs = [
+                    'time_hours' => $time_hours,
+                    'time_minutes' => $time_minutes,
+                    'credits_per_interval' => $credits_per_interval,
+                    'credits_per_minute' => $credits_per_minute,
+                    'credits_per_hour' => $credits_per_minute * 60
+                ];
+                
+            } elseif ($calculation_type === 'minute') {
+                // Handle minute-based configuration
+                $credits_per_minute = isset($_POST['credits_per_minute']) ? intval($_POST['credits_per_minute']) : 1;
+                
+                $time_configs = [
+                    'credits_per_minute' => $credits_per_minute,
+                    'credits_per_hour' => $credits_per_minute * 60
+                ];
             }
             
-            // Update or insert credits_per_minute
-            $stmt = $pdo->prepare("SELECT config_key FROM system_config WHERE config_key = 'credits_per_minute'");
-            $stmt->execute();
-            
-            if ($stmt->rowCount() > 0) {
-                $stmt = $pdo->prepare("UPDATE system_config SET config_value = ? WHERE config_key = 'credits_per_minute'");
-                $stmt->execute([$credits_per_minute]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO system_config (config_key, config_value) VALUES ('credits_per_minute', ?)");
-                $stmt->execute([$credits_per_minute]);
+            // Save all configurations
+            foreach ($time_configs as $key => $value) {
+                $stmt = $pdo->prepare("SELECT config_key FROM system_config WHERE config_key = ?");
+                $stmt->execute([$key]);
+                
+                if ($stmt->rowCount() > 0) {
+                    $stmt = $pdo->prepare("UPDATE system_config SET config_value = ? WHERE config_key = ?");
+                    $stmt->execute([$value, $key]);
+                } else {
+                    $stmt = $pdo->prepare("INSERT INTO system_config (config_key, config_value) VALUES (?, ?)");
+                    $stmt->execute([$key, $value]);
+                }
             }
             
             $success_message = "Configuración de créditos actualizada correctamente";
@@ -169,7 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get current configurations
-$stmt = $pdo->prepare("SELECT config_key, config_value FROM system_config WHERE config_key IN ('site_title', 'company_logo', 'credits_per_hour', 'credits_per_minute', 'credits_calculation_type')");
+$stmt = $pdo->prepare("SELECT config_key, config_value FROM system_config WHERE config_key IN ('site_title', 'company_logo', 'credits_per_hour', 'credits_per_minute', 'credits_calculation_type', 'time_hours', 'time_minutes', 'credits_per_interval')");
 $stmt->execute();
 $configs = [];
 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -301,19 +313,40 @@ $active_sessions = $stmt->fetchColumn();
                 <div class="form-group">
                     <label>Tipo de cálculo:</label>
                     <select name="credits_calculation_type" class="glass-input" id="calculationType" onchange="toggleCreditsInput()">
-                        <option value="hour" <?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'hour' ? 'selected' : ''; ?>>Por hora</option>
-                        <option value="minute" <?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'minute' ? 'selected' : ''; ?>>Por minuto</option>
+                        <option value="hour" <?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'hour' ? 'selected' : ''; ?>>Por tiempo específico (horas y minutos)</option>
+                        <option value="minute" <?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'minute' ? 'selected' : ''; ?>>Por minuto trabajado</option>
                     </select>
                 </div>
                 
                 <div class="form-group" id="hourlyInput" style="<?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'minute' ? 'display: none;' : ''; ?>">
-                    <label>Créditos por hora trabajada:</label>
-                    <input type="number" step="1" name="credits_per_hour" value="<?php echo htmlspecialchars($configs['credits_per_hour'] ?? '1'); ?>" class="glass-input">
+                    <label>Configurar intervalo de tiempo:</label>
+                    <div class="time-config-container">
+                        <div class="time-input-group">
+                            <label class="sub-label">Horas:</label>
+                            <input type="number" min="0" max="23" step="1" name="time_hours" value="<?php echo htmlspecialchars($configs['time_hours'] ?? '1'); ?>" class="glass-input time-input">
+                        </div>
+                        <div class="time-input-group">
+                            <label class="sub-label">Minutos:</label>
+                            <input type="number" min="0" max="59" step="1" name="time_minutes" value="<?php echo htmlspecialchars($configs['time_minutes'] ?? '0'); ?>" class="glass-input time-input">
+                        </div>
+                    </div>
+                    <div class="time-config-container" style="margin-top: 15px;">
+                        <div class="time-input-group">
+                            <label class="sub-label">Créditos por cada intervalo:</label>
+                            <input type="number" step="1" name="credits_per_interval" value="<?php echo htmlspecialchars($configs['credits_per_interval'] ?? '1'); ?>" class="glass-input">
+                        </div>
+                    </div>
+                    <small class="form-hint">
+                        Ejemplo: Si configuras 1 hora y 30 minutos con 5 créditos, el usuario recibirá 5 créditos cada 90 minutos trabajados.
+                    </small>
                 </div>
                 
                 <div class="form-group" id="minuteInput" style="<?php echo ($configs['credits_calculation_type'] ?? 'hour') === 'hour' ? 'display: none;' : ''; ?>">
                     <label>Créditos por minuto trabajado:</label>
                     <input type="number" step="1" name="credits_per_minute" value="<?php echo htmlspecialchars($configs['credits_per_minute'] ?? '1'); ?>" class="glass-input">
+                    <small class="form-hint">
+                        El usuario recibirá estos créditos por cada minuto trabajado.
+                    </small>
                 </div>
                 
                 <button type="submit" class="glass-button">
@@ -486,6 +519,46 @@ $active_sessions = $stmt->fetchColumn();
         max-height: 100px;
         border-radius: 8px;
         border: 2px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .time-config-container {
+        display: flex;
+        gap: 15px;
+        align-items: end;
+        flex-wrap: wrap;
+    }
+
+    .time-input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        min-width: 120px;
+    }
+
+    .sub-label {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.9em;
+        font-weight: 400;
+    }
+
+    .time-input {
+        width: 100%;
+        max-width: 120px;
+    }
+
+    @media (max-width: 768px) {
+        .time-config-container {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        
+        .time-input-group {
+            min-width: auto;
+        }
+        
+        .time-input {
+            max-width: none;
+        }
     }
     </style>
     <script src="assets/js/notifications.js"></script>
