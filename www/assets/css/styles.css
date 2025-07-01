@@ -661,7 +661,7 @@ body {
 }
 
 .dashboard-container {
-    padding: 2.5rem;
+    padding: 1rem;
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
@@ -670,11 +670,11 @@ body {
 .dashboard-header {
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(20px);
-    border-radius: 20px;
+    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    padding: 1.5rem;
-    margin-bottom: 2rem;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
 }
 
 .header-content {
@@ -682,11 +682,11 @@ body {
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 0.75rem;
 }
 
 .dashboard-title {
-    font-size: 2rem;
+    font-size: 1.25rem;
     font-weight: 600;
     color: #FFFFFF;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -695,18 +695,18 @@ body {
 .user-section {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.75rem;
 }
 
 .user-info {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
 }
 
 .user-avatar {
-    width: 48px;
-    height: 48px;
+    width: 32px;
+    height: 32px;
     background: linear-gradient(135deg, rgb(60, 30, 80), rgb(40, 60, 30));
     border-radius: 50%;
     display: flex;
@@ -714,7 +714,7 @@ body {
     justify-content: center;
     color: #FFFFFF;
     font-weight: 600;
-    font-size: 1.125rem;
+    font-size: 0.8rem;
 }
 
 .user-details h3 {
@@ -746,37 +746,37 @@ body {
 /* Dashboard Grid */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 0.75rem;
 }
 
 .dashboard-card {
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(20px);
-    border-radius: 20px;
+    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    padding: 1.5rem;
+    padding: 0.75rem;
 
 }
 
 .dashboard-card:hover {
     background: rgba(255, 255, 255, 0.15);
-    transform: translateY(-4px);
+    transform: translateY(-1px);
 }
 
 .card-title {
-    font-size: 1.25rem;
+    font-size: 1rem;
     font-weight: 600;
     color: #FFFFFF;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .card-description {
     color: rgba(255, 255, 255, 0.8);
-    font-size: 0.875rem;
-    line-height: 1.5;
+    font-size: 0.75rem;
+    line-height: 1.3;
 }
 
 /* Botón volver con glass-morphism */
@@ -891,8 +891,7 @@ body {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     min-width: 70px;
     text-align: center;
-}
-
+}The CSS for the mission and role bars are updated to ensure they occupy the full width, andthe character's name will be used instead of the role name in the title.
 .pause-btn {
     background: rgba(255, 193, 7, 0.8);
 }
@@ -932,25 +931,41 @@ body {
 /* Responsive Design */
 @media (max-width: 768px) {
     .dashboard-container {
-        padding: 1rem;
+        padding: 0.5rem;
+    }
+
+    .dashboard-header {
+        padding: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .dashboard-title {
+        font-size: 1.1rem;
     }
 
     .header-content {
         flex-direction: column;
         text-align: center;
+        gap: 0.25rem;
     }
 
     .user-section {
-        flex-direction: column;
+        flex-direction: row;
+        justify-content: center;
     }
 
     .dashboard-grid {
         grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+
+    .dashboard-card {
+        padding: 0.5rem;
     }
 
     .stats-grid {
         grid-template-columns: 1fr;
-        gap: 15px;
+        gap: 8px;
     }
 
     .session-actions {
@@ -965,15 +980,10 @@ body {
 }
 
 /* Dynamic role colors - will be applied via JavaScript */
+        /* Base styling for role elements - colors will be applied dynamically via JavaScript */
         .user-role-badge, .role-text {
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.3s ease;
+            background: rgba(156, 163, 175, 0.3);
+            color: #9ca3af;
         }
 
         /* Fallback for roles without database color */
@@ -1014,4 +1024,41 @@ body {
         .user-role-badge:not([class*="role-"]) { 
             background: rgba(107, 114, 128, 0.3); 
             color: #6b7280; 
+        }
+
+        .rank-mission, .rank-role {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            padding: 8px 0;
+            width: 100%;
+        }
+
+        .mission-label, .role-label {
+            font-weight: 600;
+            color: rgba(156, 39, 176, 0.9);
+            min-width: 60px;
+            font-size: 0.95em;
+            flex-shrink: 0;
+        }
+
+        .mission-text, .role-text {
+            color: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            font-size: 0.95em;
+            line-height: 1.4;
+            min-height: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
+            flex: 1;
+            max-width: none;
+            min-width: 0;
+            width: 100% !important;
+            flex-shrink: 0 !important;
         }

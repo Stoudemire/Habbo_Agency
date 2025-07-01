@@ -782,7 +782,7 @@ try {
                 </div>
             <?php endif; ?>
 
-The code has been modified to include credit configuration options for each rank, migrating the functionality from the developer panel.            <div class="dashboard-card">
+<div class="dashboard-card">
                 <div class="section-header">
                     <h3 class="card-title">
                         <i class="fas fa-users-cog"></i>

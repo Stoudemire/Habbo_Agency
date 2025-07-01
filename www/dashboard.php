@@ -411,7 +411,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     </div>
                 </div>
                 <div class="rank-details">
-                    <h2 class="rank-title"><?php echo htmlspecialchars($rank_info['display_name'] ?? ucfirst($user_role)); ?></h2>
+                    <h2 class="rank-title"><?php echo htmlspecialchars($user['habbo_username']); ?></h2>
                     <div class="rank-mission">
                         <span class="mission-label">Misión:</span>
                         <span class="mission-text" id="mission-text"><?php echo htmlspecialchars($rank_info['description'] ?? 'Miembro del equipo'); ?></span>
@@ -422,6 +422,9 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     <div class="rank-role">
                         <span class="role-label">Rol:</span>
                         <span class="role-text" id="role-text"><?php echo htmlspecialchars($rank_info['display_name'] ?? ucfirst($user_role)); ?></span>
+                        <button class="copy-btn" onclick="copyRoleText()" title="Copiar rol">
+                            <i class="fas fa-copy"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -529,6 +532,22 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             });
         }
 
+        function copyRoleText() {
+            const roleText = document.getElementById('role-text').textContent;
+            navigator.clipboard.writeText(roleText).then(function() {
+                window.notifications.success('Rol copiado al portapapeles');
+            }).catch(function() {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = roleText;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                window.notifications.success('Rol copiado al portapapeles');
+            });
+        }
+
         // Real-time role update function
         function checkRoleUpdate() {
             fetch('api/get_user_role_update.php')
@@ -541,10 +560,10 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                             element.textContent = data.display_name;
                         });
 
-                        // Update rank title
-                        const rankTitle = document.querySelector('.rank-title');
-                        if (rankTitle) {
-                            rankTitle.textContent = data.display_name;
+                        // Update mission text instead of title (title should remain as character name)
+                        const missionText = document.querySelector('.mission-text');
+                        if (missionText) {
+                            missionText.textContent = data.description || 'Miembro del equipo';
                         }
 
                         // Update header role
@@ -574,20 +593,23 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
         // Check for role updates every 3 seconds
         setInterval(checkRoleUpdate, 3000);
 
-        // Function to apply role colors based on role name
+        // Function to apply role colors based on role name (only for color, not width)
         function applyRoleColors(roleName) {
             const roleElements = document.querySelectorAll('.role-text, .user-role-badge');
             
             roleElements.forEach(element => {
-                // Remove all existing role classes
-                element.className = element.className.replace(/\brole-\S+/g, '');
+                // Only update the color style with !important to override CSS
+                const roleColorMap = {
+                    'super_admin': { bg: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' },
+                    'administrador': { bg: 'rgba(59, 130, 246, 0.3)', color: '#3b82f6' },
+                    'admin': { bg: 'rgba(59, 130, 246, 0.3)', color: '#3b82f6' },
+                    'operador': { bg: 'rgba(147, 51, 234, 0.3)', color: '#9333ea' },
+                    'usuario': { bg: 'rgba(156, 163, 175, 0.3)', color: '#9ca3af' }
+                };
                 
-                // Add the new role class
-                if (element.classList.contains('role-text')) {
-                    element.classList.add('role-text', 'role-' + roleName);
-                } else {
-                    element.classList.add('user-role-badge', 'role-' + roleName);
-                }
+                const colors = roleColorMap[roleName] || { bg: 'rgba(156, 163, 175, 0.3)', color: '#9ca3af' };
+                element.style.setProperty('background', colors.bg, 'important');
+                element.style.setProperty('color', colors.color, 'important');
             });
         }
 

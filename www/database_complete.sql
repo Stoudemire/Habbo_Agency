@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE, -- Mantener por compatibilidad
     password VARCHAR(255) NOT NULL,
-    role ENUM('super_admin', 'administrador', 'operador', 'usuario') DEFAULT 'usuario',
+    role VARCHAR(100) NOT NULL DEFAULT 'usuario',
     habbo_username VARCHAR(50) NOT NULL UNIQUE,
     profile_image VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

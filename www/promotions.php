@@ -76,10 +76,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 
     try {
         if ($user_role === 'super_admin') {
-            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username LIMIT 5");
+            $stmt = $pdo->prepare("
+                SELECT u.id, u.habbo_username, u.role, u.created_at, COALESCE(r.level, 999) as role_level
+                FROM users u 
+                LEFT JOIN user_ranks r ON u.role = r.rank_name 
+                WHERE u.id != ? 
+                ORDER BY role_level DESC, u.habbo_username ASC 
+                LIMIT 5
+            ");
             $stmt->execute([$_SESSION['user_id']]);
         } else {
-            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username LIMIT 5");
+            $stmt = $pdo->prepare("
+                SELECT u.id, u.habbo_username, u.role, u.created_at, COALESCE(r.level, 999) as role_level
+                FROM users u 
+                LEFT JOIN user_ranks r ON u.role = r.rank_name 
+                WHERE u.id != ? AND u.role != 'super_admin' 
+                ORDER BY role_level DESC, u.habbo_username ASC 
+                LIMIT 5
+            ");
             $stmt->execute([$_SESSION['user_id']]);
         }
         $users_data = $stmt->fetchAll();
@@ -258,10 +272,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Get users that can be promoted (excluding super_admin from view unless current user is super_admin) - Limited to 5
 if ($user_role === 'super_admin') {
-    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username LIMIT 5");
+    $stmt = $pdo->prepare("
+        SELECT u.id, u.habbo_username, u.role, u.created_at, COALESCE(r.level, 999) as role_level
+        FROM users u 
+        LEFT JOIN user_ranks r ON u.role = r.rank_name 
+        WHERE u.id != ? 
+        ORDER BY role_level DESC, u.habbo_username ASC 
+        LIMIT 5
+    ");
     $stmt->execute([$_SESSION['user_id']]);
 } else {
-    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username LIMIT 5");
+    $stmt = $pdo->prepare("
+        SELECT u.id, u.habbo_username, u.role, u.created_at, COALESCE(r.level, 999) as role_level
+        FROM users u 
+        LEFT JOIN user_ranks r ON u.role = r.rank_name 
+        WHERE u.id != ? AND u.role != 'super_admin' 
+        ORDER BY role_level DESC, u.habbo_username ASC 
+        LIMIT 5
+    ");
     $stmt->execute([$_SESSION['user_id']]);
 }
 $promotable_users = $stmt->fetchAll();
@@ -904,7 +932,8 @@ try {
                                     'administrador' => 'fas fa-shield-alt',
                                     'super_admin' => 'fas fa-crown'
                                 ];
-                                $icon = $role_icons[$rank['rank_name']] ?? 'fas fa-star';
+                                // Los rangos personalizados usan el mismo icono que usuario
+                                $icon = $role_icons[$rank['rank_name']] ?? 'fas fa-user';
                                 ?>
                                 <i class="<?php echo $icon; ?>" style="font-size: 24px; margin-bottom: 8px;"></i>
                                 <div style="font-weight: bold;"><?php echo htmlspecialchars($rank['display_name']); ?></div>
