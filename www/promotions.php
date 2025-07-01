@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             LEFT JOIN users promoted ON pl.promoted_user_id = promoted.id
             LEFT JOIN users promoter ON pl.promoted_by_user_id = promoter.id
             ORDER BY pl.created_at DESC
-            LIMIT 50
+            LIMIT 5
         ");
         $stmt->execute();
         $history_data = $stmt->fetchAll();
@@ -73,10 +73,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     
     try {
         if ($user_role === 'super_admin') {
-            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username");
+            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username LIMIT 5");
             $stmt->execute([$_SESSION['user_id']]);
         } else {
-            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username");
+            $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username LIMIT 5");
             $stmt->execute([$_SESSION['user_id']]);
         }
         $users_data = $stmt->fetchAll();
@@ -86,6 +86,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
         exit();
+    }
+}
+
+// Check and fix database structure for custom ranks
+try {
+    // Check if role column is ENUM
+    $stmt = $pdo->prepare("DESCRIBE users");
+    $stmt->execute();
+    $columns = $stmt->fetchAll();
+    
+    $role_is_enum = false;
+    foreach ($columns as $column) {
+        if ($column['Field'] === 'role' && strpos($column['Type'], 'enum') !== false) {
+            $role_is_enum = true;
+            break;
+        }
+    }
+    
+    // If role is ENUM, convert to VARCHAR to allow custom ranks
+    if ($role_is_enum) {
+        try {
+            $pdo->exec("ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'usuario'");
+        } catch (Exception $e) {
+            // If ALTER fails, continue with existing structure
+        }
+    }
+} catch (Exception $e) {
+    // Continue if structure check fails
+}
+
+// Get all available ranks from database
+$available_ranks = [];
+$rank_hierarchy = [];
+try {
+    if ($user_role === 'super_admin') {
+        $stmt = $pdo->prepare("SELECT rank_name, display_name, level FROM user_ranks ORDER BY level ASC");
+    } else {
+        $stmt = $pdo->prepare("SELECT rank_name, display_name, level FROM user_ranks WHERE rank_name != 'super_admin' ORDER BY level ASC");
+    }
+    $stmt->execute();
+    $ranks_data = $stmt->fetchAll();
+    
+    foreach ($ranks_data as $rank) {
+        $available_ranks[] = $rank['rank_name'];
+        $rank_hierarchy[$rank['rank_name']] = $rank['level'];
+    }
+} catch (Exception $e) {
+    // Fallback to default roles if there's an error
+    $available_ranks = ['usuario', 'operador', 'administrador'];
+    $rank_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
+    if ($user_role === 'super_admin') {
+        $available_ranks[] = 'super_admin';
     }
 }
 
@@ -103,13 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Auto-generate reason if automatic
             if ($reason_type === 'automatic') {
-                $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
                 $target_stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
                 $target_stmt->execute([$target_user_id]);
                 $current_role = $target_stmt->fetchColumn();
                 
-                $current_level = $role_hierarchy[$current_role] ?? 0;
-                $new_level = $role_hierarchy[$new_role] ?? 0;
+                $current_level = $rank_hierarchy[$current_role] ?? 0;
+                $new_level = $rank_hierarchy[$new_role] ?? 0;
                 
                 if ($new_level > $current_level) {
                     $promotion_reason = "Ascenso por buen desempeño y cumplimiento de responsabilidades";
@@ -119,12 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Validate the new role
-            $valid_roles = ['usuario', 'operador', 'administrador'];
-            if ($user_role === 'super_admin') {
-                $valid_roles[] = 'super_admin';
-            }
-
-            if (!in_array($new_role, $valid_roles)) {
+            if (!in_array($new_role, $available_ranks)) {
                 echo json_encode(['success' => false, 'message' => 'Rol no válido seleccionado.']);
                 exit();
             }
@@ -150,10 +196,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Check permission hierarchy
-            $role_hierarchy = ['usuario' => 1, 'operador' => 2, 'administrador' => 3, 'super_admin' => 4];
-            $current_user_level = $role_hierarchy[$user_role] ?? 0;
-            $target_current_level = $role_hierarchy[$target_user['role']] ?? 0;
-            $new_role_level = $role_hierarchy[$new_role] ?? 0;
+            $current_user_level = $rank_hierarchy[$user_role] ?? 0;
+            $target_current_level = $rank_hierarchy[$target_user['role']] ?? 0;
+            $new_role_level = $rank_hierarchy[$new_role] ?? 0;
 
             if ($current_user_level <= $target_current_level && $user_role !== 'super_admin') {
                 echo json_encode(['success' => false, 'message' => 'No tienes permisos para modificar a este usuario.']);
@@ -234,17 +279,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// Get users that can be promoted (excluding super_admin from view unless current user is super_admin)
+// Get users that can be promoted (excluding super_admin from view unless current user is super_admin) - Limited to 5
 if ($user_role === 'super_admin') {
-    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username");
+    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? ORDER BY role, habbo_username LIMIT 5");
     $stmt->execute([$_SESSION['user_id']]);
 } else {
-    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username");
+    $stmt = $pdo->prepare("SELECT id, habbo_username, role, created_at FROM users WHERE id != ? AND role != 'super_admin' ORDER BY role, habbo_username LIMIT 5");
     $stmt->execute([$_SESSION['user_id']]);
 }
 $promotable_users = $stmt->fetchAll();
 
-// Get recent promotions log
+// Get recent promotions log - Limited to 5
 try {
     $stmt = $pdo->prepare("
         SELECT pl.*, 
@@ -254,7 +299,7 @@ try {
         LEFT JOIN users promoted ON pl.promoted_user_id = promoted.id
         LEFT JOIN users promoter ON pl.promoted_by_user_id = promoter.id
         ORDER BY pl.created_at DESC
-        LIMIT 50
+        LIMIT 5
     ");
     $stmt->execute();
     $recent_promotions = $stmt->fetchAll();
@@ -274,15 +319,16 @@ try {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .promotions-container {
-            display: grid;
-            grid-template-columns: 1fr 400px;
+            display: flex;
+            flex-direction: column;
             gap: 25px;
-            height: calc(100vh - 200px);
+            max-width: 100%;
         }
 
         .main-table-section {
             display: flex;
             flex-direction: column;
+            width: 100%;
         }
 
         .search-container {
@@ -322,7 +368,7 @@ try {
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 15px;
             overflow: hidden;
-            height: 440px;
+            height: 500px;
             display: flex;
             flex-direction: column;
         }
@@ -332,6 +378,8 @@ try {
             padding: 20px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.2);
             flex-shrink: 0;
+            height: 70px;
+            box-sizing: border-box;
         }
 
         .users-table {
@@ -343,7 +391,8 @@ try {
         .table-scroll {
             flex: 1;
             overflow-y: auto;
-            height: 360px;
+            height: 430px;
+            max-height: 430px;
         }
 
         .users-table th {
@@ -354,12 +403,14 @@ try {
             color: #ffffff;
             border-bottom: 1px solid rgba(255, 255, 255, 0.2);
             height: 50px;
+            box-sizing: border-box;
         }
 
         .users-table td {
             padding: 12px 15px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            height: 70px;
+            height: 82px;
+            box-sizing: border-box;
         }
 
         .users-table tbody tr:hover {
@@ -398,6 +449,8 @@ try {
         .history-section {
             display: flex;
             flex-direction: column;
+            width: 100%;
+            margin-top: 20px;
         }
 
         .history-container {
@@ -406,16 +459,19 @@ try {
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 15px;
             padding: 20px;
-            height: 440px;
+            height: 500px;
             display: flex;
             flex-direction: column;
+            box-sizing: border-box;
+            width: 100%;
         }
 
         .history-scroll {
             flex: 1;
             overflow-y: auto;
             margin-top: 15px;
-            height: 300px;
+            height: 360px;
+            max-height: 360px;
         }
 
         .history-item {
@@ -424,7 +480,8 @@ try {
             padding: 12px;
             margin-bottom: 8px;
             border-left: 4px solid #9c27b0;
-            min-height: 50px;
+            min-height: 70px;
+            box-sizing: border-box;
         }
 
         .history-search {
@@ -638,25 +695,25 @@ try {
 
         @media (max-width: 1024px) {
             .promotions-container {
-                grid-template-columns: 1fr;
-                height: auto;
                 gap: 20px;
             }
             
             .users-table-container {
-                height: 380px;
+                height: 400px;
             }
             
             .table-scroll {
-                height: 300px;
+                height: 330px;
+                max-height: 330px;
             }
             
             .history-container {
-                height: 380px;
+                height: 400px;
             }
             
             .history-scroll {
-                height: 280px;
+                height: 260px;
+                max-height: 260px;
             }
         }
     </style>
@@ -713,13 +770,15 @@ try {
                                     <?php foreach ($promotable_users as $promotable_user): ?>
                                         <tr data-user-id="<?php echo $promotable_user['id']; ?>" data-username="<?php echo htmlspecialchars($promotable_user['habbo_username']); ?>">
                                             <td>
-                                                <div style="display: flex; align-items: center; gap: 10px;">
-                                                    <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotable_user['habbo_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
-                                                         alt="Avatar de <?php echo htmlspecialchars($promotable_user['habbo_username']); ?>"
-                                                         style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
-                                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                                    <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
-                                                        <?php echo strtoupper(substr($promotable_user['habbo_username'], 0, 1)); ?>
+                                                <div style="display: flex; align-items: center; gap: 15px;">
+                                                    <div style="width: 70px; height: 70px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
+                                                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotable_user['habbo_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                                             alt="Avatar de <?php echo htmlspecialchars($promotable_user['habbo_username']); ?>"
+                                                             style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                        <div style="width: 100%; height: 100%; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                                            <?php echo strtoupper(substr($promotable_user['habbo_username'], 0, 1)); ?>
+                                                        </div>
                                                     </div>
                                                     <div>
                                                         <div style="color: #ffffff; font-weight: 500;">
@@ -763,14 +822,16 @@ try {
                             <?php foreach ($recent_promotions as $promotion): ?>
                                 <div class="history-item" data-username="<?php echo htmlspecialchars($promotion['promoted_username'] ?? ''); ?>" data-promoter="<?php echo htmlspecialchars($promotion['promoter_username'] ?? ''); ?>" data-reason="<?php echo htmlspecialchars($promotion['reason'] ?? ''); ?>">
                                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                                        <div style="display: flex; align-items: center; gap: 10px;">
+                                        <div style="display: flex; align-items: center; gap: 15px;">
                                             <?php if ($promotion['promoted_username']): ?>
-                                                <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotion['promoted_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
-                                                     alt="Avatar de <?php echo htmlspecialchars($promotion['promoted_username']); ?>"
-                                                     style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
-                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                                <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
-                                                    <?php echo strtoupper(substr($promotion['promoted_username'], 0, 1)); ?>
+                                                <div style="width: 70px; height: 70px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
+                                                    <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=<?php echo urlencode($promotion['promoted_username']); ?>&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                                         alt="Avatar de <?php echo htmlspecialchars($promotion['promoted_username']); ?>"
+                                                         style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                    <div style="width: 100%; height: 100%; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                                        <?php echo strtoupper(substr($promotion['promoted_username'], 0, 1)); ?>
+                                                    </div>
                                                 </div>
                                             <?php endif; ?>
                                             <strong style="color: #ffffff;">
@@ -824,10 +885,12 @@ try {
                 <input type="hidden" id="modalAction" name="action" value="promote_user">
 
                 <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <img id="modalUserAvatarImg" style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);" 
-                             onerror="this.style.display='none'; document.getElementById('modalUserAvatar').style.display='flex';">
-                        <div id="modalUserAvatar" style="width: 50px; height: 50px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;"></div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="width: 70px; height: 70px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
+                            <img id="modalUserAvatarImg" style="width: 100%; height: 100%; object-fit: cover; display: block;" 
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div id="modalUserAvatar" style="width: 100%; height: 100%; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;"></div>
+                        </div>
                         <div>
                             <h4 id="modalUserName" style="color: #ffffff; margin: 0;"></h4>
                             <p id="modalCurrentRole" style="color: rgba(255,255,255,0.7); margin: 5px 0 0 0; font-size: 14px;"></p>
@@ -840,28 +903,24 @@ try {
                         Nuevo Rol:
                     </label>
                     <div class="role-selection">
-                        <div class="role-card" data-role="usuario" onclick="selectModalRole('usuario')">
-                            <i class="fas fa-user" style="font-size: 24px; margin-bottom: 8px;"></i>
-                            <div style="font-weight: bold;">Usuario</div>
-                            <small>Acceso básico</small>
-                        </div>
-                        <div class="role-card" data-role="operador" onclick="selectModalRole('operador')">
-                            <i class="fas fa-cog" style="font-size: 24px; margin-bottom: 8px;"></i>
-                            <div style="font-weight: bold;">Operador</div>
-                            <small>Gestión de tiempos</small>
-                        </div>
-                        <div class="role-card" data-role="administrador" onclick="selectModalRole('administrador')">
-                            <i class="fas fa-shield-alt" style="font-size: 24px; margin-bottom: 8px;"></i>
-                            <div style="font-weight: bold;">Administrador</div>
-                            <small>Gestión completa</small>
-                        </div>
-                        <?php if ($user_role === 'super_admin'): ?>
-                        <div class="role-card" data-role="super_admin" onclick="selectModalRole('super_admin')">
-                            <i class="fas fa-crown" style="font-size: 24px; margin-bottom: 8px;"></i>
-                            <div style="font-weight: bold;">Super Admin</div>
-                            <small>Acceso total</small>
-                        </div>
-                        <?php endif; ?>
+                        <?php foreach ($ranks_data as $rank): ?>
+                            <?php if ($user_role !== 'super_admin' && $rank['rank_name'] === 'super_admin') continue; ?>
+                            <div class="role-card" data-role="<?php echo $rank['rank_name']; ?>" onclick="selectModalRole('<?php echo $rank['rank_name']; ?>')">
+                                <?php
+                                // Asignar iconos según el tipo de rol
+                                $role_icons = [
+                                    'usuario' => 'fas fa-user',
+                                    'operador' => 'fas fa-cog',
+                                    'administrador' => 'fas fa-shield-alt',
+                                    'super_admin' => 'fas fa-crown'
+                                ];
+                                $icon = $role_icons[$rank['rank_name']] ?? 'fas fa-star';
+                                ?>
+                                <i class="<?php echo $icon; ?>" style="font-size: 24px; margin-bottom: 8px;"></i>
+                                <div style="font-weight: bold;"><?php echo htmlspecialchars($rank['display_name']); ?></div>
+                                <small>Nivel <?php echo $rank['level']; ?></small>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
                     <input type="hidden" id="modalSelectedRole" name="new_role">
                 </div>
@@ -946,7 +1005,7 @@ try {
             // Set avatar image
             const avatarImg = document.getElementById('modalUserAvatarImg');
             const avatarFallback = document.getElementById('modalUserAvatar');
-            avatarImg.src = `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=s`;
+            avatarImg.src = `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l`;
             avatarImg.style.display = 'block';
             avatarFallback.style.display = 'none';
             avatarFallback.textContent = username.charAt(0).toUpperCase();
@@ -1149,13 +1208,15 @@ try {
             
             tr.innerHTML = `
                 <td>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(user.habbo_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
-                             alt="Avatar de ${user.habbo_username}"
-                             style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
-                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
-                            ${userInitial}
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="width: 70px; height: 70px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
+                            <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(user.habbo_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                 alt="Avatar de ${user.habbo_username}"
+                                 style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                ${userInitial}
+                            </div>
                         </div>
                         <div>
                             <div style="color: #ffffff; font-weight: 500;">
@@ -1199,14 +1260,16 @@ try {
             
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
                         ${promotion.promoted_username ? `
-                            <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(promotion.promoted_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
-                                 alt="Avatar de ${promotedUsername}"
-                                 style="width: 70px; height: 70px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                            <div style="width: 70px; height: 70px; background: linear-gradient(135deg, #9c27b0, #673ab7); border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
-                                ${userInitial}
+                            <div style="width: 70px; height: 70px; border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
+                                <img src="https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(promotion.promoted_username)}&action=std&direction=2&head_direction=3&img_format=png&gesture=std&headonly=1&size=l" 
+                                     alt="Avatar de ${promotedUsername}"
+                                     style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div style="width: 100%; height: 100%; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%); display: none; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5em;">
+                                    ${userInitial}
+                                </div>
                             </div>
                         ` : ''}
                         <strong style="color: #ffffff;">
