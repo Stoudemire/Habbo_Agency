@@ -622,6 +622,45 @@ function getSiteTitle() {
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
 
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            border-radius: 15px;
+        }
+
+        /* Custom scrollbar for main table */
+        .table-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            backdrop-filter: blur(5px);
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.6), 
+                rgba(156, 39, 176, 0.8));
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 0.8), 
+                rgba(156, 39, 176, 1));
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .table-container::-webkit-scrollbar-thumb:active {
+            background: linear-gradient(45deg, 
+                rgba(156, 39, 176, 1), 
+                rgba(120, 30, 140, 1));
+        }
+
         .payments-table thead {
             background: rgba(255, 255, 255, 0.2);
         }
@@ -655,13 +694,14 @@ function getSiteTitle() {
             border-radius: 8px;
             object-fit: cover;
             border: 2px solid rgba(255, 255, 255, 0.2);
+            background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
         }
 
         .user-avatar-placeholder {
             width: 70px;
             height: 70px;
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.1);
+            background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
             display: flex;
             align-items: center;
             justify-content: center;

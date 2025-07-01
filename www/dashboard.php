@@ -222,6 +222,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
             overflow: hidden;
             border: 2px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
         }
 
         .habbo-avatar {
@@ -234,7 +235,7 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
         .user-avatar-fallback {
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -316,11 +317,11 @@ $access_denied = isset($_GET['error']) && $_GET['error'] === 'access_denied';
                     <div class="user-info">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <?php if (isset($rank_info['rank_image']) && !empty($rank_info['rank_image']) && file_exists($rank_info['rank_image'])): ?>
-                                <div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
                                     <img src="<?php echo htmlspecialchars($rank_info['rank_image']); ?>" alt="Imagen del rango" style="width: 50px; height: 50px; object-fit: cover; border-radius: 6px;">
                                 </div>
                             <?php endif; ?>
-                            <div class="user-avatar-container" style="width: 70px; height: 70px;">
+                            <div class="user-avatar-container" style="width: 70px; height: 70px; background: linear-gradient(135deg, rgb(30, 20, 60) 0%, rgb(60, 20, 40) 100%);">
                             <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=<?php echo urlencode($user['habbo_username']); ?>&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
                                  alt="Avatar de <?php echo htmlspecialchars($user['habbo_username']); ?>" 
                                  class="habbo-avatar"
