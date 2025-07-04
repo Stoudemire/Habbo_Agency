@@ -75,6 +75,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $credits_time_hours = intval($_POST['credits_time_hours']);
             $credits_time_minutes = intval($_POST['credits_time_minutes']);
             $credits_per_interval = intval($_POST['credits_per_interval']);
+            $max_time_hours = intval($_POST['max_time_hours']);
+            $max_time_minutes = intval($_POST['max_time_minutes']);
+            $auto_complete_enabled = intval($_POST['auto_complete_enabled']);
 
             // Handle image upload
             if (isset($_FILES['rank_image']) && $_FILES['rank_image']['error'] === UPLOAD_ERR_OK) {
@@ -119,8 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $permissions_json = json_encode($permissions);
                     try {
                         // Try with rank_image column first
-                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image, credits_time_hours, credits_time_minutes, credits_per_interval) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval])) {
+                        $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, rank_image, credits_time_hours, credits_time_minutes, credits_per_interval, max_time_hours, max_time_minutes, auto_complete_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $max_time_hours, $max_time_minutes, $auto_complete_enabled])) {
                             $success_message = "Rango creado exitosamente.";
                         } else {
                             $error_message = "Error al crear el rango.";
@@ -128,8 +131,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         // If rank_image column doesn't exist, create without it
                         try {
-                            $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, credits_time_hours, credits_time_minutes, credits_per_interval) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval])) {
+                            $stmt = $pdo->prepare("INSERT INTO user_ranks (rank_name, display_name, level, permissions, credits_time_hours, credits_time_minutes, credits_per_interval, max_time_hours, max_time_minutes, auto_complete_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $max_time_hours, $max_time_minutes, $auto_complete_enabled])) {
                                 $success_message = "Rango creado exitosamente. Nota: Para usar imágenes, agrega la columna rank_image a la tabla.";
                             } else {
                                 $error_message = "Error al crear el rango.";
@@ -150,6 +153,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $credits_time_hours = intval($_POST['credits_time_hours']);
             $credits_time_minutes = intval($_POST['credits_time_minutes']);
             $credits_per_interval = intval($_POST['credits_per_interval']);
+            $max_time_hours = intval($_POST['max_time_hours']);
+            $max_time_minutes = intval($_POST['max_time_minutes']);
+            $auto_complete_enabled = intval($_POST['auto_complete_enabled']);
 
             // Get current rank data for image handling
             $rank_image = null; // Default value
@@ -210,8 +216,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $permissions_json = json_encode($permissions);
                     try {
                         // Try with rank_image column first
-                        $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, rank_image = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ? WHERE id = ?");
-                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $rank_id])) {
+                        $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, rank_image = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ?, max_time_hours = ?, max_time_minutes = ?, auto_complete_enabled = ? WHERE id = ?");
+                        if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $rank_image, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $max_time_hours, $max_time_minutes, $auto_complete_enabled, $rank_id])) {
                             $success_message = "Rango actualizado exitosamente.";
                         } else {
                             $error_message = "Error al actualizar el rango.";
@@ -219,8 +225,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         // If rank_image column doesn't exist, update without it
                         try {
-                            $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ? WHERE id = ?");
-                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $rank_id])) {
+                            $stmt = $pdo->prepare("UPDATE user_ranks SET rank_name = ?, display_name = ?, level = ?, permissions = ?, credits_time_hours = ?, credits_time_minutes = ?, credits_per_interval = ?, max_time_hours = ?, max_time_minutes = ?, auto_complete_enabled = ? WHERE id = ?");
+                            if ($stmt->execute([$rank_name, $display_name, $level, $permissions_json, $credits_time_hours, $credits_time_minutes, $credits_per_interval, $max_time_hours, $max_time_minutes, $auto_complete_enabled, $rank_id])) {
                                 $success_message = "Rango actualizado exitosamente. Nota: Para usar imágenes, agrega la columna rank_image a la tabla.";
                             } else {
                                 $error_message = "Error al actualizar el rango.";
@@ -842,7 +848,7 @@ try {
 
                                 <div class="rank-actions">
                                     <?php if (!in_array($rank['rank_name'], ['super_admin', 'administrador', 'operador', 'usuario'])): ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>)">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>, <?php echo isset($rank['max_time_hours']) ? $rank['max_time_hours'] : 8; ?>, <?php echo isset($rank['max_time_minutes']) ? $rank['max_time_minutes'] : 0; ?>, <?php echo isset($rank['auto_complete_enabled']) ? $rank['auto_complete_enabled'] : 1; ?>)">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -855,7 +861,7 @@ try {
                                             </button>
                                         </form>
                                     <?php else: ?>
-                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>)">
+                                        <button type="button" class="btn-edit-rank" onclick="openEditRankModal(<?php echo $rank['id']; ?>, '<?php echo htmlspecialchars($rank['rank_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($rank['display_name'], ENT_QUOTES); ?>', <?php echo $rank['level']; ?>, '<?php echo htmlspecialchars($rank['permissions'], ENT_QUOTES); ?>', <?php echo isset($rank['credits_time_hours']) ? $rank['credits_time_hours'] : 1; ?>, <?php echo isset($rank['credits_time_minutes']) ? $rank['credits_time_minutes'] : 0; ?>, <?php echo isset($rank['credits_per_interval']) ? $rank['credits_per_interval'] : 1; ?>, <?php echo isset($rank['max_time_hours']) ? $rank['max_time_hours'] : 8; ?>, <?php echo isset($rank['max_time_minutes']) ? $rank['max_time_minutes'] : 0; ?>, <?php echo isset($rank['auto_complete_enabled']) ? $rank['auto_complete_enabled'] : 1; ?>)">
                                             <i class="fas fa-edit"></i>
                                             Editar
                                         </button>
@@ -927,6 +933,27 @@ try {
                     </div>
                 </div>
 
+                <div class="credits-config-group">
+                    <h4>Configuración de Tiempo Máximo</h4>
+                    <div class="credits-config-grid">
+                        <div class="rank-form-group">
+                            <label for="max_time_hours">Horas Máximas:</label>
+                            <input type="number" id="max_time_hours" name="max_time_hours" min="0" max="999" value="8" required>
+                        </div>
+                        <div class="rank-form-group">
+                            <label for="max_time_minutes">Minutos Máximos:</label>
+                            <input type="number" id="max_time_minutes" name="max_time_minutes" min="0" max="59" value="0" required>
+                        </div>
+                        <div class="rank-form-group">
+                            <label for="auto_complete_enabled">Auto-Completar:</label>
+                            <select id="auto_complete_enabled" name="auto_complete_enabled">
+                                <option value="1">Sí</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="permissions-section">
                     <h4><i class="fas fa-key"></i> Permisos del Rango</h4>
                     <div class="permissions-grid">
@@ -972,6 +999,11 @@ try {
             document.getElementById('credits_time_minutes').value = '0';
             document.getElementById('credits_per_interval').value = '1';
 
+            //Clear max time config
+            document.getElementById('max_time_hours').value = '8';
+            document.getElementById('max_time_minutes').value = '0';
+            document.getElementById('auto_complete_enabled').value = '1';
+
             // Uncheck all permissions
             const checkboxes = document.querySelectorAll('input[name="permissions[]"]');
             checkboxes.forEach(checkbox => checkbox.checked = false);
@@ -980,7 +1012,7 @@ try {
             document.body.style.overflow = 'hidden';
         }
 
-        function openEditRankModal(rankId, rankName, displayName, level, permissions, creditsTimeHours, creditsTimeMinutes, creditsPerInterval) {
+        function openEditRankModal(rankId, rankName, displayName, level, permissions, creditsTimeHours, creditsTimeMinutes, creditsPerInterval, maxTimeHours, maxTimeMinutes, autoCompleteEnabled) {
             // Set modal for edit mode
             document.getElementById('modal-title').innerHTML = '<i class="fas fa-edit"></i> Editar Rango';
             document.getElementById('modal-action').value = 'edit_rank';
@@ -997,6 +1029,11 @@ try {
             document.getElementById('credits_time_hours').value = creditsTimeHours;
             document.getElementById('credits_time_minutes').value = creditsTimeMinutes;
             document.getElementById('credits_per_interval').value = creditsPerInterval;
+
+            // Fill max time config
+            document.getElementById('max_time_hours').value = maxTimeHours;
+            document.getElementById('max_time_minutes').value = maxTimeMinutes;
+            document.getElementById('auto_complete_enabled').value = autoCompleteEnabled;
 
             // Parse and set permissions
             let permissionsArray = [];

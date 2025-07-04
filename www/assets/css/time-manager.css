@@ -324,3 +324,49 @@
     align-items: center;
     gap: 0.5rem;
 }
+
+.action-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #FFFFFF;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+}
+
+.action-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .action-btn.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: rgba(128, 128, 128, 0.2) !important;
+            color: rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .action-btn.disabled:hover {
+            transform: none !important;
+            background: rgba(128, 128, 128, 0.2) !important;
+        }
+
+.action-btn.disabled {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.4);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.action-btn.disabled:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transform: none;
+    box-shadow: none;
+}

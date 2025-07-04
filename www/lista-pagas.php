@@ -1,4 +1,3 @@
-
 <?php
 session_start();
 
@@ -48,9 +47,10 @@ if (!$has_payment_permission) {
 // Handle GET request for history data
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'get_history') {
     header('Content-Type: application/json');
-    
+
     try {
         // Get fresh history data from database - handle orphaned records
+        // Mostrar tanto PAGADOS como PROCESADOS para preservar historial completo
         $stmt = $pdo->query("
             SELECT 
                 COALESCE(u.id, ph.user_id) as id,
@@ -64,10 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             FROM payment_history ph
             LEFT JOIN users u ON ph.user_id = u.id
             LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-            WHERE ph.status = 'PAGADO'
+            WHERE ph.status IN ('PAGADO', 'PROCESADO')
             ORDER BY ph.updated_at DESC
         ");
-        
+
         $history_data = $stmt->fetchAll();
         echo json_encode(['success' => true, 'history' => $history_data]);
         exit;
@@ -79,24 +79,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
-    
+
     try {
         $action = $_POST['action'];
-        
+
         // Handle clear_history separately (no status validation needed)
         if ($action === 'clear_history') {
             $pdo->beginTransaction();
             try {
-                // Delete all payment history records
-                $stmt = $pdo->prepare("DELETE FROM payment_history WHERE status = 'PAGADO'");
+                // NUNCA eliminar el historial de pagos - solo marcar como procesado para permitir nuevo ciclo
+                // Actualizar registros PAGADOS a un estado especial que permita nuevos trabajos
+                $stmt = $pdo->prepare("UPDATE payment_history SET status = 'PROCESADO', updated_at = NOW() WHERE status = 'PAGADO'");
                 $success = $stmt->execute();
-                
+
+                // También limpiar sesiones completadas para permitir nuevo ciclo de trabajo
+                $stmt_sessions = $pdo->prepare("DELETE FROM time_sessions WHERE status = 'completed'");
+                $stmt_sessions->execute();
+
                 if ($success) {
                     $pdo->commit();
-                    echo json_encode(['success' => true, 'message' => 'Historial limpiado completamente']);
+                    echo json_encode(['success' => true, 'message' => 'Ciclo reiniciado - usuarios pueden trabajar nuevamente (historial preservado)']);
                 } else {
                     $pdo->rollback();
-                    echo json_encode(['success' => false, 'message' => 'Error al limpiar historial']);
+                    echo json_encode(['success' => false, 'message' => 'Error al reiniciar ciclo']);
                 }
             } catch (Exception $e) {
                 $pdo->rollback();
@@ -104,73 +109,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             exit;
         }
-        
+
         // For update_status, validate status
         $user_id = intval($_POST['user_id']);
         $status = $_POST['status'];
-        
+
         if ($status !== 'PAGADO') {
             echo json_encode(['success' => false, 'message' => 'Estado inválido']);
             exit;
         }
-        
+
         // Ensure payment_history table exists with proper constraints
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS payment_history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
-                status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO') NOT NULL DEFAULT 'PENDIENTE',
+                status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE',
                 amount DECIMAL(10,2) DEFAULT 0.00,
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY unique_user (user_id),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                INDEX idx_status (status)
+                INDEX idx_status (status),
+                INDEX idx_user_id (user_id)
             )
         ");
         
-        // Use INSERT ... ON DUPLICATE KEY UPDATE for upsert operation
+        // Actualizar tabla existente para agregar estado PROCESADO si no existe
+        $pdo->exec("ALTER TABLE payment_history MODIFY status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE'");
+
+        // Update payment status to PAGADO
         $stmt = $pdo->prepare("
-            INSERT INTO payment_history (user_id, status, created_at, updated_at) 
-            VALUES (?, ?, NOW(), NOW())
-            ON DUPLICATE KEY UPDATE 
-                status = VALUES(status),
-                updated_at = NOW()
+            UPDATE payment_history 
+            SET status = ?, updated_at = NOW() 
+            WHERE user_id = ?
         ");
-        
-        $result = $stmt->execute([$user_id, $status]);
-        
-        if (!$result) {
-            $error = $stmt->errorInfo();
-            echo json_encode(['success' => false, 'message' => 'Error al guardar: ' . $error[2]]);
-            exit;
-        }
-        
-        // Verify the record was actually saved
-        $verify_stmt = $pdo->prepare("SELECT status, updated_at FROM payment_history WHERE user_id = ?");
-        $verify_stmt->execute([$user_id]);
-        $saved_record = $verify_stmt->fetch();
-        
-        if ($saved_record && $saved_record['status'] === $status) {
+
+        $result = $stmt->execute([$status, $user_id]);
+
+        if ($result && $stmt->rowCount() > 0) {
             echo json_encode([
                 'success' => true, 
-                'message' => "Estado actualizado a: $status y guardado en base de datos",
-                'timestamp' => $saved_record['updated_at']
+                'message' => "Usuario marcado como pagado correctamente"
             ]);
         } else {
             echo json_encode([
                 'success' => false, 
-                'message' => 'Error: no se pudo verificar el guardado',
-                'debug' => [
-                    'user_id' => $user_id,
-                    'expected_status' => $status,
-                    'found_record' => $saved_record
-                ]
+                'message' => 'Error: no se encontró el registro del usuario'
             ]);
         }
         exit;
-        
+
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
         exit;
@@ -195,9 +185,9 @@ try {
             INDEX idx_status (status)
         )
     ");
-    
-    // Main table: exclude users who have PAGADO status in payment_history
-    $stmt = $pdo->query("
+
+    // Pending users: Get only users who completed max time (in payment_history with PENDIENTE status)
+    $stmt_pending = $pdo->query("
         SELECT 
             u.id, 
             u.habbo_username as username, 
@@ -205,20 +195,18 @@ try {
             u.role,
             COALESCE(ur.display_name, u.role) as rank_name,
             ur.rank_image,
-            'PENDIENTE' as payment_status,
-            NOW() as payment_updated
+            ph.status as payment_status,
+            ph.updated_at as payment_updated
         FROM users u
+        JOIN payment_history ph ON u.id = ph.user_id
         LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-        WHERE NOT EXISTS (
-            SELECT 1 FROM payment_history ph 
-            WHERE ph.user_id = u.id AND ph.status = 'PAGADO'
-        )
+        WHERE ph.status = 'PENDIENTE'
         ORDER BY u.habbo_username ASC
     ");
-    $users = $stmt->fetchAll();
-    
-    
-    
+    $users = $stmt_pending->fetchAll();
+
+
+
     // History users: Get payment history and try to match with existing users
     // Use LEFT JOIN to handle cases where user_id in payment_history doesn't exist in users table
     $stmt_all = $pdo->query("
@@ -238,14 +226,14 @@ try {
         ORDER BY ph.updated_at DESC
     ");
     $all_users = $stmt_all->fetchAll();
-    
+
     // Clean up orphaned payment_history records (no matching user)
     $cleanup = $pdo->exec("
         DELETE FROM payment_history 
         WHERE user_id NOT IN (SELECT id FROM users) 
         AND status = 'PAGADO'
     ");
-    
+
     if ($cleanup > 0) {
         // Re-run the query after cleanup
         $stmt_all = $pdo->query("
@@ -266,9 +254,9 @@ try {
         ");
         $all_users = $stmt_all->fetchAll();
     }
-    
-    
-    
+
+
+
 } catch (Exception $e) {
     // Fallback if tables don't exist
     $stmt = $pdo->query("
@@ -316,7 +304,7 @@ function getSiteTitle() {
         .select2-container {
             width: 100% !important;
         }
-        
+
         .select2-container--default .select2-selection--single {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -327,7 +315,7 @@ function getSiteTitle() {
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             min-height: 45px !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__rendered {
             color: #FFFFFF !important; /* Exact same as glass-input text color */
             padding: 12px 16px !important; /* Exact same padding as glass-input */
@@ -337,7 +325,7 @@ function getSiteTitle() {
             align-items: center !important;
             height: 21px !important; /* Natural text height */
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__placeholder {
             color: rgba(255, 255, 255, 0.6) !important; /* Exact same as glass-input placeholder */
             padding: 12px 16px !important; /* Exact same padding as glass-input */
@@ -348,18 +336,18 @@ function getSiteTitle() {
             align-items: center !important;
             height: 21px !important; /* Same natural height as text */
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__arrow {
             height: 43px !important;
             right: 8px !important;
             top: 1px !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__arrow b {
             border-color: rgba(255, 255, 255, 0.8) transparent transparent transparent;
             margin-top: -2px;
         }
-        
+
         /* Dropdown styling with glass effect - EXACT copy from time-manager */
         .select2-dropdown {
             background: rgba(255, 255, 255, 0.15) !important;
@@ -368,22 +356,22 @@ function getSiteTitle() {
             border-radius: 8px !important;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
         }
-        
+
         /* Results container glass background */
         .select2-results {
             background: transparent !important;
         }
-        
+
         .select2-results__options {
             background: transparent !important;
         }
-        
+
         /* Search field in dropdown with magnifying glass - EXACT copy */
         .select2-search--dropdown {
             position: relative;
             padding: 8px;
         }
-        
+
         .select2-search--dropdown .select2-search__field {
             background: rgba(255, 255, 255, 0.2) !important;
             backdrop-filter: blur(10px) !important;
@@ -394,11 +382,11 @@ function getSiteTitle() {
             width: 100% !important;
             box-sizing: border-box !important;
         }
-        
+
         .select2-search--dropdown .select2-search__field::placeholder {
             color: rgba(255, 255, 255, 0.7) !important;
         }
-        
+
         /* Add magnifying glass icon to search field - EXACT copy */
         .select2-search--dropdown::before {
             content: '\f002'; /* FontAwesome search icon */
@@ -412,7 +400,7 @@ function getSiteTitle() {
             z-index: 10;
             pointer-events: none;
         }
-        
+
         /* User options styling - better visibility - EXACT copy */
         .select2-container--default .select2-results__option {
             color: white !important;
@@ -421,34 +409,34 @@ function getSiteTitle() {
             font-weight: 500 !important;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
         }
-        
+
         .select2-container--default .select2-results__option--highlighted[aria-selected] {
             background: rgba(156, 39, 176, 0.4) !important;
             color: white !important;
         }
-        
+
         .select2-container--default .select2-results__option[aria-selected=true] {
             background: rgba(156, 39, 176, 0.6) !important;
             color: white !important;
         }
-        
+
         /* Focus state - EXACT copy */
         .select2-container--default.select2-container--focus .select2-selection--single {
             border-color: rgba(156, 39, 176, 0.6);
             box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.1);
         }
-        
+
         /* Custom Glass-morphism Scrollbar - EXACT copy */
         .select2-results__options::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .select2-results__options::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
             backdrop-filter: blur(5px);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.6), 
@@ -457,31 +445,31 @@ function getSiteTitle() {
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.8), 
                 rgba(156, 39, 176, 1));
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb:active {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 1), 
                 rgba(120, 30, 140, 1));
         }
-        
+
         /* History table container custom scrollbar - match time-manager exactly */
         .history-table-container::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .history-table-container::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
             backdrop-filter: blur(5px);
         }
-        
+
         .history-table-container::-webkit-scrollbar-thumb {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.6), 
@@ -490,14 +478,14 @@ function getSiteTitle() {
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
-        
+
         .history-table-container::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.8), 
                 rgba(156, 39, 176, 1));
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
         }
-        
+
         .history-table-container::-webkit-scrollbar-thumb:active {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 1), 
@@ -829,7 +817,7 @@ function getSiteTitle() {
         .select2-container {
             width: 100% !important;
         }
-        
+
         .select2-container--default .select2-selection--single {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -840,7 +828,7 @@ function getSiteTitle() {
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             min-height: 45px !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__rendered {
             color: #FFFFFF !important;
             padding: 12px 16px !important;
@@ -849,21 +837,21 @@ function getSiteTitle() {
             font-weight: 500 !important;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__placeholder {
             color: rgba(255, 255, 255, 0.7) !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__arrow {
             height: 43px !important;
             right: 12px !important;
         }
-        
+
         .select2-container--default .select2-selection--single .select2-selection__arrow b {
             border-color: rgba(255, 255, 255, 0.8) transparent transparent transparent !important;
             border-width: 6px 6px 0 6px !important;
         }
-        
+
         /* Dropdown styling with glass effect - EXACT COPY */
         .select2-dropdown {
             background: rgba(255, 255, 255, 0.15) !important;
@@ -872,22 +860,22 @@ function getSiteTitle() {
             border-radius: 8px !important;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
         }
-        
+
         /* Results container glass background */
         .select2-results {
             background: transparent !important;
         }
-        
+
         .select2-results__options {
             background: transparent !important;
         }
-        
+
         /* Search field in dropdown with magnifying glass - EXACT COPY */
         .select2-search--dropdown {
             position: relative;
             padding: 8px;
         }
-        
+
         .select2-search--dropdown .select2-search__field {
             background: rgba(255, 255, 255, 0.2) !important;
             backdrop-filter: blur(10px) !important;
@@ -898,11 +886,11 @@ function getSiteTitle() {
             width: 100% !important;
             box-sizing: border-box !important;
         }
-        
+
         .select2-search--dropdown .select2-search__field::placeholder {
             color: rgba(255, 255, 255, 0.7) !important;
         }
-        
+
         /* Add magnifying glass icon to search field - EXACT COPY */
         .select2-search--dropdown::before {
             content: '\f002';
@@ -916,7 +904,7 @@ function getSiteTitle() {
             z-index: 10;
             pointer-events: none;
         }
-        
+
         /* User options styling - better visibility - EXACT COPY */
         .select2-container--default .select2-results__option {
             color: white !important;
@@ -925,34 +913,34 @@ function getSiteTitle() {
             font-weight: 500 !important;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
         }
-        
+
         .select2-container--default .select2-results__option--highlighted[aria-selected] {
             background: rgba(156, 39, 176, 0.4) !important;
             color: white !important;
         }
-        
+
         .select2-container--default .select2-results__option[aria-selected=true] {
             background: rgba(156, 39, 176, 0.6) !important;
             color: white !important;
         }
-        
+
         /* Focus state - EXACT COPY */
         .select2-container--default.select2-container--focus .select2-selection--single {
             border-color: rgba(156, 39, 176, 0.6);
             box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.1);
         }
-        
+
         /* Custom Glass-morphism Scrollbar - EXACT COPY */
         .select2-results__options::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .select2-results__options::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
             backdrop-filter: blur(5px);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.6), 
@@ -961,14 +949,14 @@ function getSiteTitle() {
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 0.8), 
                 rgba(156, 39, 176, 1));
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
         }
-        
+
         .select2-results__options::-webkit-scrollbar-thumb:active {
             background: linear-gradient(45deg, 
                 rgba(156, 39, 176, 1), 
@@ -1006,7 +994,7 @@ function getSiteTitle() {
                     <i class="fas fa-money-bill-wave"></i>
                     Lista de Pagas
                 </h1>
-                
+
                 <div class="header-actions">
                     <a href="dashboard.php" class="back-btn">
                         <i class="fas fa-arrow-left"></i>
@@ -1024,7 +1012,7 @@ function getSiteTitle() {
                     Buscar Usuario
                 </h3>
             </div>
-            
+
             <div class="form-group">
                 <label for="userSelect">Usuario:</label>
                 <select id="userSelect" class="glass-select">
@@ -1043,7 +1031,7 @@ function getSiteTitle() {
             <div class="card-header">
                 <!-- Título eliminado según solicitud del usuario -->
             </div>
-            
+
             <div class="table-container">
                 <table class="sessions-table" id="paymentsTable">
                     <thead>
@@ -1099,14 +1087,14 @@ function getSiteTitle() {
                     <i class="fas fa-history"></i>
                     Historial de Pagos
                 </h3>
-                
+
                 <div class="history-tabs">
                     <button class="btn-clear-history" onclick="clearCompleteHistory()">
                         <i class="fas fa-trash-alt"></i> Limpiar Lista
                     </button>
                 </div>
             </div>
-            
+
             <!-- Pagados Table -->
             <div class="table-container history-table-container" id="history-pagado">
                 <table class="sessions-table">
@@ -1150,9 +1138,9 @@ function getSiteTitle() {
         // Store main table users (PENDIENTES) and history users (PAGADOS/CANCELADOS)
         const mainUsers = <?php echo json_encode($users); ?>;
         let historyUsers = <?php echo json_encode($all_users); ?>;
-        
-        
-        
+
+
+
         document.addEventListener('DOMContentLoaded', function() {
             setupUserSearch();
             populateHistoryTables();
@@ -1183,12 +1171,12 @@ function getSiteTitle() {
                     if ($.trim(params.term) === '') {
                         return data;
                     }
-                    
+
                     // Search in username (case insensitive)
                     if (data.text.toLowerCase().indexOf(params.term.toLowerCase()) > -1) {
                         return data;
                     }
-                    
+
                     // Return null if no match
                     return null;
                 }
@@ -1204,13 +1192,13 @@ function getSiteTitle() {
             $('#userSelect').on('change', function() {
                 const selectedUserId = $(this).val();
                 const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
-                
+
                 if (selectedUserId) {
                     // Filter by username instead of ID
                     tableRows.forEach(row => {
                         const userCell = row.cells[0];
                         const userNameInRow = userCell.querySelector('h4').textContent.toLowerCase();
-                        
+
                         if (userNameInRow.includes(selectedUserId.toLowerCase())) {
                             row.style.display = '';
                         } else {
@@ -1236,7 +1224,7 @@ function getSiteTitle() {
 
         function filterTableBySearch(searchTerm) {
             const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
-            
+
             if (searchTerm === '') {
                 // Show all rows when search is empty
                 tableRows.forEach(row => {
@@ -1249,11 +1237,11 @@ function getSiteTitle() {
                     const userNameInRow = userCell.querySelector('h4').textContent.toLowerCase();
                     const userEmailInRow = userCell.querySelector('p').textContent.toLowerCase();
                     const userRank = row.cells[1].textContent.toLowerCase();
-                    
+
                     // Check if search term matches username or rank
                     const matchesUsername = userNameInRow.includes(searchTerm);
                     const matchesRank = userRank.includes(searchTerm);
-                    
+
                     if (matchesUsername || matchesRank) {
                         row.style.display = '';
                     } else {
@@ -1265,10 +1253,10 @@ function getSiteTitle() {
 
         function populateHistoryTables() {
             const pagadoTbody = document.getElementById('pagado-tbody');
-            
+
             // Clear existing content
             pagadoTbody.innerHTML = '';
-            
+
             // Always try to fetch fresh data from server to ensure accuracy
             fetch('lista-pagas.php?action=get_history')
             .then(response => response.json())
@@ -1276,10 +1264,10 @@ function getSiteTitle() {
                 if (data.success && data.history && data.history.length > 0) {
                     // Update historyUsers with fresh data
                     historyUsers = data.history;
-                    
+
                     // Clear and repopulate table
                     pagadoTbody.innerHTML = '';
-                    
+
                     data.history.forEach(user => {
                         if (user.payment_status === 'PAGADO') {
                             pagadoTbody.appendChild(createHistoryRow(user, 'PAGADO'));
@@ -1343,10 +1331,10 @@ function getSiteTitle() {
             if (!confirm('¿Estás seguro de que quieres limpiar completamente el historial? Esta acción no se puede deshacer.')) {
                 return;
             }
-            
+
             const formData = new FormData();
             formData.append('action', 'clear_history');
-            
+
             fetch('lista-pagas.php', {
                 method: 'POST',
                 body: formData
@@ -1355,64 +1343,20 @@ function getSiteTitle() {
             .then(data => {
                 if (data.success) {
                     showNotification(data.message, 'success');
-                    
-                    // Get the main table body
-                    const mainTableBody = document.querySelector('#paymentsTable tbody');
-                    
-                    // Move all users from history back to main table in real-time
-                    historyUsers.forEach(user => {
-                        if (user.payment_status === 'PAGADO') {
-                            // Create new row in main table with PENDIENTE status
-                            const newRow = document.createElement('tr');
-                            newRow.setAttribute('data-user-id', user.id);
-                            newRow.setAttribute('data-username', user.username.toLowerCase());
-                            
-                            const userInitial = user.username.charAt(0).toUpperCase();
-                            newRow.innerHTML = `
-                                <td>
-                                    <div class="user-info">
-                                        <img src="https://www.habbo.es/habbo-imaging/avatarimage?img_format=png&user=${encodeURIComponent(user.habbo_username || user.username)}&direction=2&head_direction=3&size=l&gesture=std&action=std&headonly=1" 
-                                             alt="Avatar de ${user.username}" 
-                                             class="user-avatar"
-                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                        <div class="user-avatar-placeholder" style="display: none;">
-                                            ${userInitial}
-                                        </div>
-                                        <div class="user-details">
-                                            <h4>${user.username}</h4>
-                                            <p>Habbo: ${user.username}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td>${user.rank_name || user.role}</td>
-                                <td>
-                                    <span class="status-badge status-pendiente">
-                                        PENDIENTE
-                                    </span>
-                                </td>
-                                <td>
-                                    <div class="action-buttons">
-                                        <button class="btn-action btn-pagado" onclick="updatePaymentStatus(${user.id}, 'PAGADO')" data-user-id="${user.id}" data-status="PAGADO">
-                                            <i class="fas fa-check-circle"></i> Pagado
-                                        </button>
-                                    </div>
-                                </td>
-                            `;
-                            
-                            mainTableBody.appendChild(newRow);
-                        }
-                    });
-                    
+
+                    // Los usuarios ahora pueden volver a trabajar y completar tiempo máximo
+                    // para aparecer nuevamente en la lista de pagas
+
                     // Clear the history table
                     const pagadoTbody = document.getElementById('pagado-tbody');
                     pagadoTbody.innerHTML = '';
-                    
+
                     // Clear historyUsers array
                     historyUsers = [];
-                    
+
                     // Update the search functionality to include the new rows
                     setupUserSearch();
-                    
+
                 } else {
                     showNotification('Error al limpiar historial: ' + data.message, 'error');
                 }
@@ -1449,22 +1393,22 @@ function getSiteTitle() {
                 if (data.success) {
                     // Find the user row in the main table
                     const row = document.querySelector(`tr[data-user-id="${userId}"]`);
-                    
+
                     if (row && status === 'PAGADO') {
                         // Get username for notification
                         const usernameElement = row.querySelector('.user-details h4');
                         const username = usernameElement ? usernameElement.textContent : 'Usuario';
-                        
+
                         // Show success notification
                         if (window.notifications) {
                             window.notifications.success(`${username} marcado como pagado`);
                         }
-                        
+
                         // Add smooth fade out animation
                         row.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
                         row.style.opacity = '0';
                         row.style.transform = 'translateX(-20px)';
-                        
+
                         // Remove row after animation and refresh history
                         setTimeout(() => {
                             row.remove();

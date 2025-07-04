@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS user_ranks (
     credits_time_hours INT DEFAULT 1,
     credits_time_minutes INT DEFAULT 0,
     credits_per_interval INT DEFAULT 1,
+    max_time_hours INT DEFAULT 8,
+    max_time_minutes INT DEFAULT 0,
+    auto_complete_enabled INT DEFAULT 1,
     role_color VARCHAR(7) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -111,6 +114,22 @@ PREPARE stmt3 FROM @sql3;
 EXECUTE stmt3;
 DEALLOCATE PREPARE stmt3;
 
+-- Agregar columnas de tiempo máximo
+SET @sql4 = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'user_ranks' AND column_name = 'max_time_hours' AND table_schema = DATABASE()) = 0, 'ALTER TABLE user_ranks ADD COLUMN max_time_hours INT DEFAULT 8', 'SELECT 1');
+PREPARE stmt4 FROM @sql4;
+EXECUTE stmt4;
+DEALLOCATE PREPARE stmt4;
+
+SET @sql5 = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'user_ranks' AND column_name = 'max_time_minutes' AND table_schema = DATABASE()) = 0, 'ALTER TABLE user_ranks ADD COLUMN max_time_minutes INT DEFAULT 0', 'SELECT 1');
+PREPARE stmt5 FROM @sql5;
+EXECUTE stmt5;
+DEALLOCATE PREPARE stmt5;
+
+SET @sql6 = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'user_ranks' AND column_name = 'auto_complete_enabled' AND table_schema = DATABASE()) = 0, 'ALTER TABLE user_ranks ADD COLUMN auto_complete_enabled INT DEFAULT 1', 'SELECT 1');
+PREPARE stmt6 FROM @sql6;
+EXECUTE stmt6;
+DEALLOCATE PREPARE stmt6;
+
 -- Insertar configuración básica del sistema (sin configuración de créditos)
 INSERT IGNORE INTO system_config (config_key, config_value) VALUES
 ('site_title', 'Habbo Agency'),
@@ -120,8 +139,12 @@ INSERT IGNORE INTO system_config (config_key, config_value) VALUES
 UPDATE user_ranks SET 
     credits_time_hours = 1,
     credits_time_minutes = 0, 
-    credits_per_interval = 1
-WHERE credits_time_hours IS NULL OR credits_time_minutes IS NULL OR credits_per_interval IS NULL;
+    credits_per_interval = 1,
+    max_time_hours = 8,
+    max_time_minutes = 0,
+    auto_complete_enabled = 1
+WHERE credits_time_hours IS NULL OR credits_time_minutes IS NULL OR credits_per_interval IS NULL 
+   OR max_time_hours IS NULL OR max_time_minutes IS NULL OR auto_complete_enabled IS NULL;
 
 -- Remover configuración de créditos del sistema (ahora se maneja por rango)
 DELETE FROM system_config WHERE config_key IN (

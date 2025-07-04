@@ -99,10 +99,10 @@ class TimeManager {
     }
 
     startAutoRefresh() {
-        // Refresh sessions every 2 seconds for more responsive updates
+        // Refresh sessions every 10 seconds to stay synchronized without being too frequent
         setInterval(() => {
             this.loadActiveSessions();
-        }, 2000);
+        }, 10000);
     }
 
     renderSessions(sessions) {
@@ -202,14 +202,29 @@ class TimeManager {
 
     renderActionButtons(session) {
         const buttons = [];
+        const autoCompleteEnabled = session.credits_config && session.credits_config.auto_complete_enabled == 1;
 
         if (session.status === 'active') {
             buttons.push(`<button class="action-btn pause-btn" onclick="window.timeManager.pauseTimer(${session.id})">⏸ Pausar</button>`);
-            buttons.push(`<button class="action-btn stop-btn" onclick="window.timeManager.stopTimer(${session.id})">⏹ Detener</button>`);
+            
+            // Disable stop button if auto-complete is enabled
+            if (autoCompleteEnabled) {
+                buttons.push(`<button class="action-btn stop-btn disabled" disabled title="Auto-completar habilitado - el tiempo se detendrá automáticamente">⏹ Detener</button>`);
+            } else {
+                buttons.push(`<button class="action-btn stop-btn" onclick="window.timeManager.stopTimer(${session.id})">⏹ Detener</button>`);
+            }
+            
             buttons.push(`<button class="action-btn cancel-btn" onclick="window.timeManager.cancelTimer(${session.id})">✕ Cancelar</button>`);
         } else if (session.status === 'paused') {
             buttons.push(`<button class="action-btn resume-btn" onclick="window.timeManager.resumeTimer(${session.id})">▶ Reanudar</button>`);
-            buttons.push(`<button class="action-btn stop-btn" onclick="window.timeManager.stopTimer(${session.id})">⏹ Detener</button>`);
+            
+            // Disable stop button if auto-complete is enabled
+            if (autoCompleteEnabled) {
+                buttons.push(`<button class="action-btn stop-btn disabled" disabled title="Auto-completar habilitado - el tiempo se detendrá automáticamente">⏹ Detener</button>`);
+            } else {
+                buttons.push(`<button class="action-btn stop-btn" onclick="window.timeManager.stopTimer(${session.id})">⏹ Detener</button>`);
+            }
+            
             buttons.push(`<button class="action-btn cancel-btn" onclick="window.timeManager.cancelTimer(${session.id})">✕ Cancelar</button>`);
         }
 
@@ -223,18 +238,39 @@ class TimeManager {
 
         sessions.forEach(session => {
             if (session.status === 'active') {
-                // Convert MySQL timestamp to proper UTC timestamp
-                const startTime = new Date(session.start_time.replace(' ', 'T') + 'Z').getTime();
+                // Use server-provided timestamps for accurate calculation
                 const baseSeconds = parseInt(session.total_time) || 0;
+                const serverTimestamp = session.server_timestamp || Math.floor(Date.now() / 1000);
+                const startTimestamp = session.start_timestamp || serverTimestamp;
 
-                // Start interval for this timer
+                // Calculate max time limit
+                const maxTimeSeconds = session.credits_config ? 
+                    (session.credits_config.max_time_hours * 3600) + (session.credits_config.max_time_minutes * 60) : 
+                    (8 * 3600); // Default 8 hours
+
+                // Start interval for this timer - use server time as reference
                 const interval = setInterval(() => {
-                    const now = Date.now();
-                    const elapsed = Math.floor((now - startTime) / 1000);
-                    const currentTotal = baseSeconds + elapsed;
+                    // Calculate elapsed time based on server time reference
+                    const currentServerTime = Math.floor(Date.now() / 1000);
+                    const timeDiff = currentServerTime - serverTimestamp;
+                    const sessionElapsed = (serverTimestamp - startTimestamp) + timeDiff;
+                    const currentTotal = baseSeconds + sessionElapsed;
+
+                    // Check if user reached max time limit
+                    if (currentTotal >= maxTimeSeconds && session.credits_config && session.credits_config.auto_complete_enabled) {
+                        // Stop the timer automatically
+                        this.autoStopTimer(session.id);
+                        return;
+                    }
 
                     const timerElement = document.getElementById(`timer-${session.id}`);
                     if (timerElement) {
+                        // Show timer in different color if close to limit (last 10 minutes)
+                        if (currentTotal >= maxTimeSeconds - 600) {
+                            timerElement.style.color = '#ff9800';
+                        } else if (currentTotal >= maxTimeSeconds - 300) {
+                            timerElement.style.color = '#f44336';
+                        }
                         timerElement.textContent = this.formatTime(currentTotal);
                     }
 
@@ -257,9 +293,18 @@ class TimeManager {
                 // Also update the timer immediately
                 const timerElement = document.getElementById(`timer-${session.id}`);
                 if (timerElement) {
-                    const now = Date.now();
-                    const elapsed = Math.floor((now - startTime) / 1000);
-                    const currentTotal = baseSeconds + elapsed;
+                    const currentServerTime = Math.floor(Date.now() / 1000);
+                    const timeDiff = currentServerTime - serverTimestamp;
+                    const sessionElapsed = (serverTimestamp - startTimestamp) + timeDiff;
+                    const currentTotal = baseSeconds + sessionElapsed;
+
+                    // Check if already at or over limit
+                    if (currentTotal >= maxTimeSeconds) {
+                        timerElement.style.color = '#f44336';
+                    } else if (currentTotal >= maxTimeSeconds - 600) {
+                        timerElement.style.color = '#ff9800';
+                    }
+
                     timerElement.textContent = this.formatTime(currentTotal);
                 }
             } else if (session.status === 'paused') {
@@ -287,6 +332,29 @@ class TimeManager {
 
     async cancelTimer(sessionId) {
         await this.performTimerAction(sessionId, 'cancel_timer', 'Cancelando...');
+    }
+
+    async autoStopTimer(sessionId) {
+        try {
+            const formData = new FormData();
+            formData.append('action', 'stop_timer');
+            formData.append('session_id', sessionId);
+
+            const response = await fetch('time-manager.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showNotification('Usuario completó su tiempo máximo y fue agregado a la lista de pagas', 'success');
+                // Update table in real-time
+                await this.loadActiveSessions();
+            }
+        } catch (error) {
+            console.error('Error auto-stopping timer:', error);
+        }
     }
 
     async performTimerAction(sessionId, action, loadingText) {
@@ -352,6 +420,70 @@ class TimeManager {
             // Fallback for compatibility
             console.log(`${type.toUpperCase()}: ${message}`);
         }
+    }
+
+    updateTimer(sessionId, currentSeconds, creditsConfig) {
+        const timerElement = document.getElementById(`timer-${sessionId}`);
+        const creditsElement = document.getElementById(`credits-${sessionId}`);
+
+        if (timerElement && creditsElement) {
+            // Update timer display
+            const hours = Math.floor(currentSeconds / 3600);
+            const minutes = Math.floor((currentSeconds % 3600) / 60);
+            const seconds = currentSeconds % 60;
+            timerElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            // Calculate credits using interval-based system (not proportional)
+            const totalMinutes = currentSeconds / 60;
+            const intervalMinutes = (creditsConfig.time_hours * 60) + creditsConfig.time_minutes;
+            const validIntervalMinutes = intervalMinutes > 0 ? intervalMinutes : 60;
+
+            // Only give credits for completed intervals
+            const completedIntervals = Math.floor(totalMinutes / validIntervalMinutes);
+            const creditsEarned = completedIntervals * creditsConfig.credits_per_interval;
+
+            creditsElement.textContent = creditsEarned;
+
+            // Check if user has reached max time limit and auto-complete is enabled
+            if (creditsConfig.auto_complete_enabled && creditsConfig.max_time_seconds > 0 && currentSeconds >= creditsConfig.max_time_seconds) {
+                // Auto-stop the timer when max time is reached
+                console.log(`Max time reached (${creditsConfig.max_time_seconds}s), auto-stopping timer for session:`, sessionId);
+                this.stopTimer(sessionId, true); // Pass true to indicate auto-stop
+            }
+        }
+    }
+
+    stopTimer(sessionId, isAutoStop = false) {
+        if (!window.canManageTimers && !isAutoStop) {
+            this.showNotification('No tienes permisos para detener cronómetros', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('action', 'stop_timer');
+        formData.append('session_id', sessionId);
+
+        fetch('time-manager.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (isAutoStop && data.max_time_reached) {
+                    this.showNotification('Usuario completó tiempo máximo - movido a lista de pagas', 'info');
+                } else {
+                    this.showNotification('Cronómetro detenido exitosamente', 'success');
+                }
+                this.loadActiveSessions();
+            } else {
+                this.showNotification('Error al detener cronómetro: ' + data.message, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            this.showNotification('Error de conexión', 'error');
+        });
     }
 }
 
