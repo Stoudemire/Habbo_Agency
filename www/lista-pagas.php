@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 
     try {
         // Get fresh history data from database - handle orphaned records
-        // Mostrar tanto PAGADOS como PROCESADOS para preservar historial completo
+        // Mostrar PAGADOS y PROCESADOS para preservar historial completo
         $stmt = $pdo->query("
             SELECT 
                 COALESCE(u.id, ph.user_id) as id,
@@ -87,21 +87,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($action === 'clear_history') {
             $pdo->beginTransaction();
             try {
-                // NUNCA eliminar el historial de pagos - solo marcar como procesado para permitir nuevo ciclo
-                // Actualizar registros PAGADOS a un estado especial que permita nuevos trabajos
-                $stmt = $pdo->prepare("UPDATE payment_history SET status = 'PROCESADO', updated_at = NOW() WHERE status = 'PAGADO'");
-                $success = $stmt->execute();
+                // Borrar COMPLETAMENTE todo el historial de pagos
+                $stmt = $pdo->prepare("DELETE FROM payment_history");
+                $success_payments = $stmt->execute();
 
-                // También limpiar sesiones completadas para permitir nuevo ciclo de trabajo
-                $stmt_sessions = $pdo->prepare("DELETE FROM time_sessions WHERE status = 'completed'");
-                $stmt_sessions->execute();
+                // Borrar TODAS las sesiones de tiempo (activas, pausadas, completadas)
+                $stmt_sessions = $pdo->prepare("DELETE FROM time_sessions");
+                $success_sessions = $stmt_sessions->execute();
 
-                if ($success) {
+                if ($success_payments && $success_sessions) {
                     $pdo->commit();
-                    echo json_encode(['success' => true, 'message' => 'Ciclo reiniciado - usuarios pueden trabajar nuevamente (historial preservado)']);
+                    echo json_encode(['success' => true, 'message' => 'Lista completamente limpiada - todo comienza de 0']);
                 } else {
                     $pdo->rollback();
-                    echo json_encode(['success' => false, 'message' => 'Error al reiniciar ciclo']);
+                    echo json_encode(['success' => false, 'message' => 'Error al limpiar la lista completamente']);
                 }
             } catch (Exception $e) {
                 $pdo->rollback();
@@ -135,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 INDEX idx_user_id (user_id)
             )
         ");
-        
+
         // Actualizar tabla existente para agregar estado PROCESADO si no existe
         $pdo->exec("ALTER TABLE payment_history MODIFY status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE'");
 
@@ -209,6 +208,7 @@ try {
 
     // History users: Get payment history and try to match with existing users
     // Use LEFT JOIN to handle cases where user_id in payment_history doesn't exist in users table
+    // Mostrar tanto PAGADO como PROCESADO para preservar historial completo
     $stmt_all = $pdo->query("
         SELECT 
             COALESCE(u.id, ph.user_id) as id,
@@ -222,7 +222,7 @@ try {
         FROM payment_history ph
         LEFT JOIN users u ON ph.user_id = u.id
         LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-        WHERE ph.status = 'PAGADO'
+        WHERE ph.status IN ('PAGADO', 'PROCESADO')
         ORDER BY ph.updated_at DESC
     ");
     $all_users = $stmt_all->fetchAll();
@@ -231,7 +231,7 @@ try {
     $cleanup = $pdo->exec("
         DELETE FROM payment_history 
         WHERE user_id NOT IN (SELECT id FROM users) 
-        AND status = 'PAGADO'
+        AND status IN ('PAGADO', 'PROCESADO')
     ");
 
     if ($cleanup > 0) {
@@ -249,7 +249,7 @@ try {
             FROM payment_history ph
             LEFT JOIN users u ON ph.user_id = u.id
             LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-            WHERE ph.status = 'PAGADO'
+            WHERE ph.status IN ('PAGADO', 'PROCESADO')
             ORDER BY ph.updated_at DESC
         ");
         $all_users = $stmt_all->fetchAll();
@@ -737,6 +737,12 @@ function getSiteTitle() {
             border-color: rgba(244, 67, 54, 0.4);
         }
 
+        .status-procesado {
+            background: rgba(156, 39, 176, 0.2);
+            color: #9c27b0;
+            border-color: rgba(156, 39, 176, 0.4);
+        }
+
         .action-buttons {
             display: flex;
             gap: 8px;
@@ -1090,7 +1096,7 @@ function getSiteTitle() {
 
                 <div class="history-tabs">
                     <button class="btn-clear-history" onclick="clearCompleteHistory()">
-                        <i class="fas fa-trash-alt"></i> Limpiar Lista
+                        <i class="fas fa-trash"></i> Limpiar Lista
                     </button>
                 </div>
             </div>
@@ -1288,8 +1294,8 @@ function getSiteTitle() {
                 console.error('Error fetching fresh history, using local data:', error);
                 // Use local PHP data as fallback
                 historyUsers.forEach(user => {
-                    if (user.payment_status === 'PAGADO') {
-                        pagadoTbody.appendChild(createHistoryRow(user, 'PAGADO'));
+                    if (user.payment_status === 'PAGADO' || user.payment_status === 'PROCESADO') {
+                        pagadoTbody.appendChild(createHistoryRow(user, user.payment_status));
                     } else if (user.payment_status === 'CANCELADO') {
                         canceladoTbody.appendChild(createHistoryRow(user, 'CANCELADO'));
                     }
@@ -1328,7 +1334,7 @@ function getSiteTitle() {
         }
 
         function clearCompleteHistory() {
-            if (!confirm('¿Estás seguro de que quieres limpiar completamente el historial? Esta acción no se puede deshacer.')) {
+            if (!confirm('¿Estás seguro de que quieres BORRAR COMPLETAMENTE todo el historial y todas las sesiones? Esta acción NO se puede deshacer y todo comenzará de 0.')) {
                 return;
             }
 
@@ -1344,18 +1350,10 @@ function getSiteTitle() {
                 if (data.success) {
                     showNotification(data.message, 'success');
 
-                    // Los usuarios ahora pueden volver a trabajar y completar tiempo máximo
-                    // para aparecer nuevamente en la lista de pagas
-
-                    // Clear the history table
-                    const pagadoTbody = document.getElementById('pagado-tbody');
-                    pagadoTbody.innerHTML = '';
-
-                    // Clear historyUsers array
-                    historyUsers = [];
-
-                    // Update the search functionality to include the new rows
-                    setupUserSearch();
+                    // Recargar la página completamente para mostrar que todo está limpio
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
 
                 } else {
                     showNotification('Error al limpiar historial: ' + data.message, 'error');

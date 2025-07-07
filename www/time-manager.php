@@ -81,6 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     header('Content-Type: application/json');
 
     try {
+        // IMPORTANT: Execute auto-complete check before getting sessions
+        autoCompleteUsersAtMaxTime($pdo);
+        
         // Get active sessions with calculated current totals
         // If user can't manage timers, only show their own sessions
         if ($can_manage_timers) {
@@ -155,14 +158,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 // Function to auto-complete users who reached max time limit
 function autoCompleteUsersAtMaxTime($pdo) {
     try {
-        // Get all active sessions with their user configs, excluding users already in payment history
+        // Ensure payment_history table exists with proper schema
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS payment_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE',
+                amount DECIMAL(10,2) DEFAULT 0.00,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_user (user_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                INDEX idx_status (status),
+                INDEX idx_user_id (user_id)
+            )
+        ");
+
+        // Get all active sessions with their user configs
         $stmt = $pdo->prepare("
             SELECT ts.*, ur.max_time_hours, ur.max_time_minutes, ur.auto_complete_enabled, u.username
             FROM time_sessions ts 
             JOIN users u ON ts.user_id = u.id
             JOIN user_ranks ur ON u.role = ur.rank_name 
-            LEFT JOIN payment_history ph ON ts.user_id = ph.user_id
-            WHERE ts.status = 'active' AND ur.auto_complete_enabled = 1 AND ph.user_id IS NULL
+            WHERE ts.status = 'active' AND ur.auto_complete_enabled = 1
         ");
         $stmt->execute();
         $active_sessions = $stmt->fetchAll();
@@ -179,22 +198,27 @@ function autoCompleteUsersAtMaxTime($pdo) {
 
             // Check if user has reached max time limit
             if ($current_total >= $max_time_seconds) {
-                // Auto-complete the session (same logic as stop_timer)
+                // Auto-complete the session
                 $stmt_update = $pdo->prepare("UPDATE time_sessions SET status = 'completed', total_time = ?, end_time = NOW() WHERE id = ?");
                 $stmt_update->execute([$current_total, $session['id']]);
 
-                // Add user to payment list when they complete max time - prevent duplicates
-                $stmt_check = $pdo->prepare("SELECT id FROM payment_history WHERE user_id = ?");
+                // Check if user is already in payment history with PENDIENTE status
+                $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ?");
                 $stmt_check->execute([$session['user_id']]);
+                $existing_payment = $stmt_check->fetch();
 
-                if (!$stmt_check->fetch()) {
-                    // Only add if not already in payment history
+                if (!$existing_payment) {
+                    // Add user to payment list with PENDIENTE status
                     $stmt_payment = $pdo->prepare("
                         INSERT INTO payment_history (user_id, status, created_at, updated_at) 
                         VALUES (?, 'PENDIENTE', NOW(), NOW())
                     ");
                     $stmt_payment->execute([$session['user_id']]);
+                    
+                    error_log("Usuario {$session['username']} (ID: {$session['user_id']}) agregado a payment_history automáticamente");
                 }
+                // NO cambiar usuarios de PROCESADO a PENDIENTE automáticamente
+                // Esto preserva el historial de pagos
             }
         }
     } catch (Exception $e) {
@@ -238,6 +262,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit();
             }
 
+            // Ensure payment_history table has PROCESADO status
+            $pdo->exec("ALTER TABLE payment_history MODIFY status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE'");
+            
             // Check if user is in payment list with PENDIENTE status - don't allow new work
             $stmt = $pdo->prepare("SELECT status FROM payment_history WHERE user_id = ? AND status = 'PENDIENTE'");
             $stmt->execute([$user_id]);
@@ -248,21 +275,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit();
             }
 
-            // If user was marked as PAGADO, remove them from payment_history and clear completed sessions to allow new work cycle
-            $stmt = $pdo->prepare("DELETE FROM payment_history WHERE user_id = ? AND status = 'PAGADO'");
-            $stmt->execute([$user_id]);
+            // NO CAMBIAR el estado en payment_history - mantener el historial intacto
+            // Solo verificar que el usuario no tenga estado PENDIENTE (ya verificado arriba)
+            
+            // NO ELIMINAR sesiones completadas - preservar el historial completo de tiempo
+            // Las sesiones completadas son importantes para el historial y estadísticas
 
-            // Also clear all completed sessions for this user to reset their time tracking completely
-            $stmt = $pdo->prepare("DELETE FROM time_sessions WHERE user_id = ? AND status = 'completed'");
-            $stmt->execute([$user_id]);
+            // Iniciar siempre con tiempo 0 para nuevos ciclos de trabajo
+            // No acumular tiempo de sesiones anteriores - cada ciclo es independiente
+            $accumulated_seconds = 0;
 
-            // Get accumulated time from the user's most recent completed session (should be 0 now)
-            $stmt = $pdo->prepare("SELECT total_time FROM time_sessions WHERE user_id = ? AND status = 'completed' ORDER BY end_time DESC LIMIT 1");
-            $stmt->execute([$user_id]);
-            $last_session = $stmt->fetch();
-            $accumulated_seconds = $last_session ? $last_session['total_time'] : 0;
-
-            // Start new timer with accumulated time from previous completed sessions
+            // Start new timer with fresh time count
             $stmt = $pdo->prepare("INSERT INTO time_sessions (user_id, username, start_time, description, status, total_time) VALUES (?, ?, UTC_TIMESTAMP(), ?, 'active', ?)");
             $success = $stmt->execute([$user_id, $username, $description, $accumulated_seconds]);
 
@@ -339,20 +362,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $user_credits_config = getCreditsConfigForUser($pdo, $session['user_id']);
                 $max_time_seconds = ($user_credits_config['max_time_hours'] * 3600) + ($user_credits_config['max_time_minutes'] * 60);
 
-                // Only add to payment list if auto_complete is enabled AND max time is reached AND user not already in payment history
-                if ($user_credits_config['auto_complete_enabled'] && $total_seconds >= $max_time_seconds) {
-                    // Check if user is already in payment_history to prevent duplicates
-                    $stmt_check = $pdo->prepare("SELECT id FROM payment_history WHERE user_id = ?");
+                // Add to payment list if max time is reached
+                if ($total_seconds >= $max_time_seconds) {
+                    // Check if user is already in payment_history 
+                    $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ?");
                     $stmt_check->execute([$session['user_id']]);
+                    $existing_payment = $stmt_check->fetch();
 
-                    if (!$stmt_check->fetch()) {
-                        // Only add if not already in payment history
+                    if (!$existing_payment) {
+                        // Add user to payment list with PENDIENTE status
                         $stmt_payment = $pdo->prepare("
                             INSERT INTO payment_history (user_id, status, created_at, updated_at) 
                             VALUES (?, 'PENDIENTE', NOW(), NOW())
                         ");
                         $stmt_payment->execute([$session['user_id']]);
                     }
+                    // NO cambiar usuarios de PROCESADO a PENDIENTE automáticamente
+                    // Esto preserva el historial de pagos
                 }
 
                 echo json_encode(['success' => $success, 'total_time' => $total_seconds, 'max_time_reached' => $total_seconds >= $max_time_seconds]);
@@ -430,6 +456,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $stmt = $pdo->prepare("SELECT id, username FROM users ORDER BY username ASC");
 $stmt->execute();
 $users = $stmt->fetchAll();
+
+// IMPORTANT: Execute auto-complete check when page loads
+autoCompleteUsersAtMaxTime($pdo);
 
 // Get active sessions with calculated current totals
 // If user can't manage timers, only show their own sessions
