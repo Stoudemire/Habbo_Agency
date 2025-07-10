@@ -190,12 +190,15 @@ CREATE TABLE IF NOT EXISTS payment_history (
     status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO') NOT NULL DEFAULT 'PENDIENTE',
     amount DECIMAL(10,2) DEFAULT 0.00,
     description TEXT,
+    processed_by_user_id INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (processed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_user_id (user_id),
     INDEX idx_status (status),
-    INDEX idx_updated (updated_at)
+    INDEX idx_updated (updated_at),
+    INDEX idx_processed_by (processed_by_user_id)
 );
 
 -- Insertar horarios de negocio por defecto (Lunes a Viernes 9:00-18:00, Sábado 10:00-14:00, Domingo cerrado)
@@ -230,3 +233,9 @@ CREATE TABLE IF NOT EXISTS session_invalidations (
     invalidated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Agregar columna processed_by_user_id a payment_history si no existe
+SET @sql_processed_by = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'payment_history' AND column_name = 'processed_by_user_id' AND table_schema = DATABASE()) = 0, 'ALTER TABLE payment_history ADD COLUMN processed_by_user_id INT DEFAULT NULL, ADD FOREIGN KEY (processed_by_user_id) REFERENCES users(id) ON DELETE SET NULL, ADD INDEX idx_processed_by (processed_by_user_id)', 'SELECT 1');
+PREPARE stmt_processed_by FROM @sql_processed_by;
+EXECUTE stmt_processed_by;
+DEALLOCATE PREPARE stmt_processed_by;

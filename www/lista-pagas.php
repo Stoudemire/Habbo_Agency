@@ -60,9 +60,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 COALESCE(ur.display_name, u.role, 'Usuario') as rank_name,
                 COALESCE(ur.rank_image, '') as rank_image,
                 ph.status as payment_status,
-                ph.updated_at as payment_updated
+                ph.amount,
+                ph.updated_at as payment_updated,
+                COALESCE(processor.habbo_username, 'Sistema') as processed_by_username
             FROM payment_history ph
             LEFT JOIN users u ON ph.user_id = u.id
+            LEFT JOIN users processor ON ph.processed_by_user_id = processor.id
             LEFT JOIN user_ranks ur ON u.role = ur.rank_name
             WHERE ph.status IN ('PAGADO', 'PROCESADO')
             ORDER BY ph.updated_at DESC
@@ -316,9 +319,12 @@ try {
             COALESCE(ur.display_name, u.role, 'Usuario') as rank_name,
             COALESCE(ur.rank_image, '') as rank_image,
             ph.status as payment_status,
-            ph.updated_at as payment_updated
+            ph.amount,
+            ph.updated_at as payment_updated,
+            COALESCE(processor.habbo_username, 'Sistema') as processed_by_username
         FROM payment_history ph
         LEFT JOIN users u ON ph.user_id = u.id
+        LEFT JOIN users processor ON ph.processed_by_user_id = processor.id
         LEFT JOIN user_ranks ur ON u.role = ur.rank_name
         WHERE ph.status IN ('PAGADO', 'PROCESADO')
         ORDER BY ph.updated_at DESC
@@ -343,9 +349,12 @@ try {
                 COALESCE(ur.display_name, u.role, 'Usuario') as rank_name,
                 COALESCE(ur.rank_image, '') as rank_image,
                 ph.status as payment_status,
-                ph.updated_at as payment_updated
+                ph.amount,
+                ph.updated_at as payment_updated,
+                COALESCE(processor.habbo_username, 'Sistema') as processed_by_username
             FROM payment_history ph
             LEFT JOIN users u ON ph.user_id = u.id
+            LEFT JOIN users processor ON ph.processed_by_user_id = processor.id
             LEFT JOIN user_ranks ur ON u.role = ur.rank_name
             WHERE ph.status IN ('PAGADO', 'PROCESADO')
             ORDER BY ph.updated_at DESC
@@ -1437,11 +1446,13 @@ function getSiteTitle() {
                     </div>
                 </td>
                 <td>${user.rank_name || user.role}</td>
+                <td>${user.amount || '0'}</td>
                 <td>
                     <span class="status-badge status-${status.toLowerCase()}">
                         ${status}
                     </span>
                 </td>
+                <td>${user.processed_by_username || 'Sistema'}</td>
                 <td>${user.payment_updated ? new Date(user.payment_updated).toLocaleDateString('es-ES') + ' ' + new Date(user.payment_updated).toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'}) : 'Sin registro'}</td>
             `;
             return row;
