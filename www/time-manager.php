@@ -144,8 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             'count' => count($active_sessions),
             'timestamp' => date('Y-m-d H:i:s'),
             'server_timestamp' => time(),
-            'sessions' => $active_sessions,
-            'credits_per_minute' => $credits_per_minute
+            'sessions' => $active_sessions
         ];
 
         echo json_encode($response);
@@ -159,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 function autoCompleteUsersAtMaxTime($pdo) {
     try {
         // Ensure payment_history table exists with proper schema
+        // SIN constraint UNIQUE para permitir múltiples registros por usuario
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS payment_history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -168,12 +168,18 @@ function autoCompleteUsersAtMaxTime($pdo) {
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY unique_user (user_id),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 INDEX idx_status (status),
-                INDEX idx_user_id (user_id)
+                INDEX idx_user_id (user_id),
+                INDEX idx_user_status (user_id, status)
             )
         ");
+
+        // Remover constraint UNIQUE si existe en tabla existente
+        $pdo->exec("ALTER TABLE payment_history DROP INDEX IF EXISTS unique_user");
+        
+        // Agregar índice para optimizar búsquedas por usuario y fecha
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_created ON payment_history (user_id, created_at DESC)");
 
         // Get all active sessions with their user configs
         $stmt = $pdo->prepare("
@@ -202,23 +208,51 @@ function autoCompleteUsersAtMaxTime($pdo) {
                 $stmt_update = $pdo->prepare("UPDATE time_sessions SET status = 'completed', total_time = ?, end_time = NOW() WHERE id = ?");
                 $stmt_update->execute([$current_total, $session['id']]);
 
-                // Check if user is already in payment history with PENDIENTE status
-                $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ?");
+                // Check if user has any payment history records
+                $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
                 $stmt_check->execute([$session['user_id']]);
-                $existing_payment = $stmt_check->fetch();
+                $latest_payment = $stmt_check->fetch();
 
-                if (!$existing_payment) {
-                    // Add user to payment list with PENDIENTE status
+                if (!$latest_payment) {
+                    // No existe historial - crear nuevo registro PENDIENTE
                     $stmt_payment = $pdo->prepare("
                         INSERT INTO payment_history (user_id, status, created_at, updated_at) 
                         VALUES (?, 'PENDIENTE', NOW(), NOW())
                     ");
-                    $stmt_payment->execute([$session['user_id']]);
+                    $success = $stmt_payment->execute([$session['user_id']]);
                     
-                    error_log("Usuario {$session['username']} (ID: {$session['user_id']}) agregado a payment_history automáticamente");
+                    if ($success) {
+                        error_log("Usuario {$session['username']} (ID: {$session['user_id']}) agregado a payment_history automáticamente por tiempo completo");
+                    } else {
+                        error_log("ERROR: No se pudo agregar usuario {$session['username']} (ID: {$session['user_id']}) a payment_history");
+                    }
+                } else if ($latest_payment['status'] === 'PROCESADO') {
+                    // Si el último estado era PROCESADO, cambiar a PENDIENTE
+                    $stmt_update_status = $pdo->prepare("UPDATE payment_history SET status = 'PENDIENTE', updated_at = NOW() WHERE id = ?");
+                    $success = $stmt_update_status->execute([$latest_payment['id']]);
+                    
+                    if ($success) {
+                        error_log("Usuario {$session['username']} (ID: {$session['user_id']}) cambiado de PROCESADO a PENDIENTE por tiempo completo");
+                    } else {
+                        error_log("ERROR: No se pudo cambiar status de usuario {$session['username']} (ID: {$session['user_id']})");
+                    }
+                } else if ($latest_payment['status'] === 'PAGADO') {
+                    // Si el último estado era PAGADO, crear NUEVO registro PENDIENTE
+                    $stmt_new_payment = $pdo->prepare("
+                        INSERT INTO payment_history (user_id, status, created_at, updated_at) 
+                        VALUES (?, 'PENDIENTE', NOW(), NOW())
+                    ");
+                    $success = $stmt_new_payment->execute([$session['user_id']]);
+                    
+                    if ($success) {
+                        error_log("Usuario {$session['username']} (ID: {$session['user_id']}) tiene nuevo registro PENDIENTE (completó tiempo después de ser PAGADO)");
+                    } else {
+                        error_log("ERROR: No se pudo crear nuevo registro PENDIENTE para usuario {$session['username']} (ID: {$session['user_id']})");
+                    }
+                } else if ($latest_payment['status'] === 'PENDIENTE') {
+                    // Ya está PENDIENTE, no hacer nada
+                    error_log("Usuario {$session['username']} (ID: {$session['user_id']}) ya está PENDIENTE, no se requiere acción");
                 }
-                // NO cambiar usuarios de PROCESADO a PENDIENTE automáticamente
-                // Esto preserva el historial de pagos
             }
         }
     } catch (Exception $e) {
@@ -275,11 +309,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit();
             }
 
-            // NO CAMBIAR el estado en payment_history - mantener el historial intacto
-            // Solo verificar que el usuario no tenga estado PENDIENTE (ya verificado arriba)
-            
-            // NO ELIMINAR sesiones completadas - preservar el historial completo de tiempo
-            // Las sesiones completadas son importantes para el historial y estadísticas
+            // Verificar si el usuario tiene historial de pagos PROCESADO
+            // Si tiene PROCESADO, cambiar a PENDIENTE para permitir nuevo trabajo
+            $stmt_check_procesado = $pdo->prepare("SELECT status FROM payment_history WHERE user_id = ? AND status = 'PROCESADO'");
+            $stmt_check_procesado->execute([$user_id]);
+            $procesado_payment = $stmt_check_procesado->fetch();
+
+            if ($procesado_payment) {
+                // Cambiar de PROCESADO a PENDIENTE para permitir nuevo ciclo de trabajo
+                $stmt_update_status = $pdo->prepare("UPDATE payment_history SET status = 'PENDIENTE', updated_at = NOW() WHERE user_id = ? AND status = 'PROCESADO'");
+                $stmt_update_status->execute([$user_id]);
+            }
 
             // Iniciar siempre con tiempo 0 para nuevos ciclos de trabajo
             // No acumular tiempo de sesiones anteriores - cada ciclo es independiente
@@ -364,21 +404,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 // Add to payment list if max time is reached
                 if ($total_seconds >= $max_time_seconds) {
-                    // Check if user is already in payment_history 
-                    $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ?");
+                    // Check if user has any payment history records
+                    $stmt_check = $pdo->prepare("SELECT id, status FROM payment_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
                     $stmt_check->execute([$session['user_id']]);
-                    $existing_payment = $stmt_check->fetch();
+                    $latest_payment = $stmt_check->fetch();
 
-                    if (!$existing_payment) {
-                        // Add user to payment list with PENDIENTE status
+                    if (!$latest_payment) {
+                        // No existe historial - crear nuevo registro PENDIENTE
                         $stmt_payment = $pdo->prepare("
                             INSERT INTO payment_history (user_id, status, created_at, updated_at) 
                             VALUES (?, 'PENDIENTE', NOW(), NOW())
                         ");
-                        $stmt_payment->execute([$session['user_id']]);
+                        $success = $stmt_payment->execute([$session['user_id']]);
+                        
+                        if ($success) {
+                            error_log("Usuario {$session['username']} (ID: {$session['user_id']}) agregado a payment_history por detener tiempo manualmente");
+                        } else {
+                            error_log("ERROR: No se pudo agregar usuario {$session['username']} (ID: {$session['user_id']}) a payment_history al detener manualmente");
+                        }
+                    } else if ($latest_payment['status'] === 'PROCESADO') {
+                        // Si el último estado era PROCESADO, cambiar a PENDIENTE
+                        $stmt_update_status = $pdo->prepare("UPDATE payment_history SET status = 'PENDIENTE', updated_at = NOW() WHERE id = ?");
+                        $success = $stmt_update_status->execute([$latest_payment['id']]);
+                        
+                        if ($success) {
+                            error_log("Usuario {$session['username']} (ID: {$session['user_id']}) cambiado de PROCESADO a PENDIENTE por detener tiempo manualmente");
+                        } else {
+                            error_log("ERROR: No se pudo cambiar status de usuario {$session['username']} (ID: {$session['user_id']}) al detener manualmente");
+                        }
+                    } else if ($latest_payment['status'] === 'PAGADO') {
+                        // Si el último estado era PAGADO, crear NUEVO registro PENDIENTE
+                        $stmt_new_payment = $pdo->prepare("
+                            INSERT INTO payment_history (user_id, status, created_at, updated_at) 
+                            VALUES (?, 'PENDIENTE', NOW(), NOW())
+                        ");
+                        $success = $stmt_new_payment->execute([$session['user_id']]);
+                        
+                        if ($success) {
+                            error_log("Usuario {$session['username']} (ID: {$session['user_id']}) tiene nuevo registro PENDIENTE por detener manualmente (completó tiempo después de ser PAGADO)");
+                        } else {
+                            error_log("ERROR: No se pudo crear nuevo registro PENDIENTE para usuario {$session['username']} (ID: {$session['user_id']}) al detener manualmente");
+                        }
+                    } else if ($latest_payment['status'] === 'PENDIENTE') {
+                        // Ya está PENDIENTE, no hacer nada
+                        error_log("Usuario {$session['username']} (ID: {$session['user_id']}) ya está PENDIENTE, no se requiere acción");
                     }
-                    // NO cambiar usuarios de PROCESADO a PENDIENTE automáticamente
-                    // Esto preserva el historial de pagos
                 }
 
                 echo json_encode(['success' => $success, 'total_time' => $total_seconds, 'max_time_reached' => $total_seconds >= $max_time_seconds]);

@@ -138,24 +138,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Actualizar tabla existente para agregar estado PROCESADO si no existe
         $pdo->exec("ALTER TABLE payment_history MODIFY status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE'");
 
-        // Update payment status to PAGADO
-        $stmt = $pdo->prepare("
-            UPDATE payment_history 
-            SET status = ?, updated_at = NOW() 
-            WHERE user_id = ?
-        ");
+        // Begin transaction to ensure both operations succeed
+        $pdo->beginTransaction();
 
-        $result = $stmt->execute([$status, $user_id]);
+        try {
+            // Calculate the total credits earned by the user
+            $stmt_credits = $pdo->prepare("
+                SELECT SUM(total_time) as total_seconds
+                FROM time_sessions 
+                WHERE user_id = ? AND status = 'completed'
+            ");
+            $stmt_credits->execute([$user_id]);
+            $credits_result = $stmt_credits->fetch();
+            $total_seconds = $credits_result['total_seconds'] ?? 0;
 
-        if ($result && $stmt->rowCount() > 0) {
-            echo json_encode([
-                'success' => true, 
-                'message' => "Usuario marcado como pagado correctamente"
-            ]);
-        } else {
+            // Get user's credits configuration
+            $stmt_config = $pdo->prepare("
+                SELECT ur.credits_time_hours, ur.credits_time_minutes, ur.credits_per_interval
+                FROM users u
+                LEFT JOIN user_ranks ur ON u.role = ur.rank_name
+                WHERE u.id = ?
+            ");
+            $stmt_config->execute([$user_id]);
+            $config = $stmt_config->fetch();
+
+            $credits_time_hours = intval($config['credits_time_hours'] ?? 1);
+            $credits_time_minutes = intval($config['credits_time_minutes'] ?? 0);
+            $credits_per_interval = intval($config['credits_per_interval'] ?? 1);
+
+            // Calculate credits using interval-based system
+            $total_minutes = $total_seconds / 60;
+            $interval_minutes = ($credits_time_hours * 60) + $credits_time_minutes;
+            if ($interval_minutes <= 0) $interval_minutes = 60;
+
+            // Only give credits for completed intervals
+            $completed_intervals = floor($total_minutes / $interval_minutes);
+            $credits_earned = $completed_intervals * $credits_per_interval;
+
+            // Update payment status to PAGADO and save the credits amount and who processed it
+            $stmt = $pdo->prepare("
+                UPDATE payment_history 
+                SET status = ?, amount = ?, processed_by_user_id = ?, updated_at = NOW() 
+                WHERE user_id = ?
+            ");
+            $result = $stmt->execute([$status, $credits_earned, $_SESSION['user_id'], $user_id]);
+
+            if ($result && $stmt->rowCount() > 0) {
+                // Reset credits by deleting all completed time sessions for this user
+                // This ensures credits start from 0 for the next work cycle
+                $stmt_delete_sessions = $pdo->prepare("
+                    DELETE FROM time_sessions 
+                    WHERE user_id = ? AND status = 'completed'
+                ");
+                $sessions_deleted = $stmt_delete_sessions->execute([$user_id]);
+
+                if ($sessions_deleted) {
+                    $pdo->commit();
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => "Usuario marcado como pagado y créditos reiniciados correctamente"
+                    ]);
+                } else {
+                    $pdo->rollback();
+                    echo json_encode([
+                        'success' => false, 
+                        'message' => 'Error al reiniciar créditos del usuario'
+                    ]);
+                }
+            } else {
+                $pdo->rollback();
+                echo json_encode([
+                    'success' => false, 
+                    'message' => 'Error: no se encontró el registro del usuario'
+                ]);
+            }
+        } catch (Exception $e) {
+            $pdo->rollback();
             echo json_encode([
                 'success' => false, 
-                'message' => 'Error: no se encontró el registro del usuario'
+                'message' => 'Error en la transacción: ' . $e->getMessage()
             ]);
         }
         exit;
@@ -186,6 +247,7 @@ try {
     ");
 
     // Pending users: Get only users who completed max time (in payment_history with PENDIENTE status)
+    // Obtener solo el registro PENDIENTE más reciente por usuario con cálculo de créditos
     $stmt_pending = $pdo->query("
         SELECT 
             u.id, 
@@ -195,14 +257,50 @@ try {
             COALESCE(ur.display_name, u.role) as rank_name,
             ur.rank_image,
             ph.status as payment_status,
-            ph.updated_at as payment_updated
+            ph.updated_at as payment_updated,
+            ur.credits_time_hours,
+            ur.credits_time_minutes,
+            ur.credits_per_interval
         FROM users u
         JOIN payment_history ph ON u.id = ph.user_id
         LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-        WHERE ph.status = 'PENDIENTE'
+        WHERE ph.status = 'PENDIENTE' 
+        AND ph.id = (
+            SELECT MAX(ph2.id) 
+            FROM payment_history ph2 
+            WHERE ph2.user_id = u.id 
+            AND ph2.status = 'PENDIENTE'
+        )
         ORDER BY u.habbo_username ASC
     ");
     $users = $stmt_pending->fetchAll();
+
+    // Calcular créditos para cada usuario PENDIENTE
+    foreach ($users as &$user) {
+        // Obtener el total de tiempo de todas las sesiones completadas del usuario
+        $stmt_time = $pdo->prepare("
+            SELECT SUM(total_time) as total_seconds
+            FROM time_sessions 
+            WHERE user_id = ? AND status = 'completed'
+        ");
+        $stmt_time->execute([$user['id']]);
+        $time_result = $stmt_time->fetch();
+        $total_seconds = $time_result['total_seconds'] ?? 0;
+
+        // Configuración de créditos del usuario
+        $credits_time_hours = intval($user['credits_time_hours'] ?? 1);
+        $credits_time_minutes = intval($user['credits_time_minutes'] ?? 0);
+        $credits_per_interval = intval($user['credits_per_interval'] ?? 1);
+
+        // Calcular créditos usando sistema basado en intervalos
+        $total_minutes = $total_seconds / 60;
+        $interval_minutes = ($credits_time_hours * 60) + $credits_time_minutes;
+        if ($interval_minutes <= 0) $interval_minutes = 60;
+
+        // Solo dar créditos por intervalos completados
+        $completed_intervals = floor($total_minutes / $interval_minutes);
+        $user['credits_earned'] = $completed_intervals * $credits_per_interval;
+    }
 
 
 
@@ -587,6 +685,10 @@ function getSiteTitle() {
 
         .history-table-container::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(45deg, rgba(156, 39, 176, 0.8), rgba(103, 58, 183, 0.8));
+        }
+
+        .history-table-container::-webkit-scrollbar-thumb:active {
+            background: linear-gradient(45deg, rgba(156, 39, 176, 1), rgba(120, 30, 140, 1));
         }
 
         .user-search {
@@ -1044,6 +1146,7 @@ function getSiteTitle() {
                         <tr>
                             <th>Usuario</th>
                             <th>Rango</th>
+                            <th>Créditos</th>
                             <th>Estado de Pago</th>
                             <th>Acciones</th>
                         </tr>
@@ -1067,6 +1170,11 @@ function getSiteTitle() {
                                     </div>
                                 </td>
                                 <td><?php echo htmlspecialchars($user['rank_name'] ?? ucfirst($user['role'])); ?></td>
+                                <td>
+                                    <span class="credits-display">
+                                        <?php echo $user['credits_earned'] ?? 0; ?>
+                                    </span>
+                                </td>
                                 <td>
                                     <span class="status-badge status-<?php echo strtolower($user['payment_status']); ?>">
                                         <?php echo $user['payment_status']; ?>
@@ -1108,7 +1216,9 @@ function getSiteTitle() {
                         <tr>
                             <th>Usuario</th>
                             <th>Rango</th>
+                            <th>Créditos Pagados</th>
                             <th>Estado</th>
+                            <th>Procesado por</th>
                             <th>Fecha</th>
                         </tr>
                     </thead>
@@ -1125,7 +1235,9 @@ function getSiteTitle() {
                         <tr>
                             <th>Usuario</th>
                             <th>Rango</th>
+                            <th>Créditos Pagados</th>
                             <th>Estado</th>
+                            <th>Procesado por</th>
                             <th>Fecha</th>
                         </tr>
                     </thead>
@@ -1243,12 +1355,14 @@ function getSiteTitle() {
                     const userNameInRow = userCell.querySelector('h4').textContent.toLowerCase();
                     const userEmailInRow = userCell.querySelector('p').textContent.toLowerCase();
                     const userRank = row.cells[1].textContent.toLowerCase();
+                    const userCredits = row.cells[2].textContent.toLowerCase();
 
-                    // Check if search term matches username or rank
+                    // Check if search term matches username, rank, or credits
                     const matchesUsername = userNameInRow.includes(searchTerm);
                     const matchesRank = userRank.includes(searchTerm);
+                    const matchesCredits = userCredits.includes(searchTerm);
 
-                    if (matchesUsername || matchesRank) {
+                    if (matchesUsername || matchesRank || matchesCredits) {
                         row.style.display = '';
                     } else {
                         row.style.display = 'none';
