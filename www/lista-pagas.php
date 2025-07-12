@@ -131,12 +131,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY unique_user (user_id),
+                processed_by_user_id INT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (processed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
                 INDEX idx_status (status),
-                INDEX idx_user_id (user_id)
+                INDEX idx_user_id (user_id),
+                INDEX idx_user_status (user_id, status)
             )
         ");
+
+        // Remover constraint UNIQUE si existe para permitir múltiples registros por usuario
+        try {
+            $pdo->exec("ALTER TABLE payment_history DROP INDEX unique_user");
+        } catch (Exception $e) {
+            // Índice no existe, continuar
+        }
 
         // Actualizar tabla existente para agregar estado PROCESADO si no existe
         $pdo->exec("ALTER TABLE payment_history MODIFY status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO', 'PROCESADO') NOT NULL DEFAULT 'PENDIENTE'");
@@ -145,46 +154,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $pdo->beginTransaction();
 
         try {
-            // Calculate the total credits earned by the user
-            $stmt_credits = $pdo->prepare("
-                SELECT SUM(total_time) as total_seconds
-                FROM time_sessions 
-                WHERE user_id = ? AND status = 'completed'
+            // Get the exact credits from the pending payment record
+            $stmt_get_pending = $pdo->prepare("
+                SELECT amount FROM payment_history 
+                WHERE user_id = ? AND status = 'PENDIENTE' 
+                ORDER BY created_at DESC LIMIT 1
             ");
-            $stmt_credits->execute([$user_id]);
-            $credits_result = $stmt_credits->fetch();
-            $total_seconds = $credits_result['total_seconds'] ?? 0;
+            $stmt_get_pending->execute([$user_id]);
+            $pending_record = $stmt_get_pending->fetch();
 
-            // Get user's credits configuration
-            $stmt_config = $pdo->prepare("
-                SELECT ur.credits_time_hours, ur.credits_time_minutes, ur.credits_per_interval
-                FROM users u
-                LEFT JOIN user_ranks ur ON u.role = ur.rank_name
-                WHERE u.id = ?
-            ");
-            $stmt_config->execute([$user_id]);
-            $config = $stmt_config->fetch();
+            // Use the amount from the pending record, or calculate if not found
+            if ($pending_record && $pending_record['amount'] > 0) {
+                $credits_earned = $pending_record['amount'];
+            } else {
+                // Fallback calculation if amount is not set
+                $stmt_credits = $pdo->prepare("
+                    SELECT SUM(total_time) as total_seconds
+                    FROM time_sessions 
+                    WHERE user_id = ? AND status = 'completed'
+                ");
+                $stmt_credits->execute([$user_id]);
+                $credits_result = $stmt_credits->fetch();
+                $total_seconds = $credits_result['total_seconds'] ?? 0;
 
-            $credits_time_hours = intval($config['credits_time_hours'] ?? 1);
-            $credits_time_minutes = intval($config['credits_time_minutes'] ?? 0);
-            $credits_per_interval = intval($config['credits_per_interval'] ?? 1);
+                // Get user's credits configuration
+                $stmt_config = $pdo->prepare("
+                    SELECT ur.credits_time_hours, ur.credits_time_minutes, ur.credits_per_interval
+                    FROM users u
+                    LEFT JOIN user_ranks ur ON u.role = ur.rank_name
+                    WHERE u.id = ?
+                ");
+                $stmt_config->execute([$user_id]);
+                $config = $stmt_config->fetch();
 
-            // Calculate credits using interval-based system
-            $total_minutes = $total_seconds / 60;
-            $interval_minutes = ($credits_time_hours * 60) + $credits_time_minutes;
-            if ($interval_minutes <= 0) $interval_minutes = 60;
+                $credits_time_hours = intval($config['credits_time_hours'] ?? 1);
+                $credits_time_minutes = intval($config['credits_time_minutes'] ?? 0);
+                $credits_per_interval = intval($config['credits_per_interval'] ?? 1);
 
-            // Only give credits for completed intervals
-            $completed_intervals = floor($total_minutes / $interval_minutes);
-            $credits_earned = $completed_intervals * $credits_per_interval;
+                // Calculate credits using interval-based system
+                $total_minutes = $total_seconds / 60;
+                $interval_minutes = ($credits_time_hours * 60) + $credits_time_minutes;
+                if ($interval_minutes <= 0) $interval_minutes = 60;
 
-            // Update payment status to PAGADO and save the credits amount and who processed it
+                // Only give credits for completed intervals
+                $completed_intervals = floor($total_minutes / $interval_minutes);
+                $credits_earned = $completed_intervals * $credits_per_interval;
+            }
+
+            // Update the existing PENDIENTE record to PAGADO instead of creating new one
             $stmt = $pdo->prepare("
                 UPDATE payment_history 
                 SET status = ?, amount = ?, processed_by_user_id = ?, updated_at = NOW() 
-                WHERE user_id = ?
+                WHERE user_id = ? AND status = 'PENDIENTE'
+                ORDER BY created_at DESC LIMIT 1
             ");
-            $result = $stmt->execute([$status, $credits_earned, $_SESSION['user_id'], $user_id]);
+            $result = $stmt->execute([$status, round($credits_earned), $_SESSION['user_id'], $user_id]);
 
             if ($result && $stmt->rowCount() > 0) {
                 // Reset credits by deleting all completed time sessions for this user
@@ -212,7 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $pdo->rollback();
                 echo json_encode([
                     'success' => false, 
-                    'message' => 'Error: no se encontró el registro del usuario'
+                    'message' => 'Error: no se encontró registro pendiente para actualizar'
                 ]);
             }
         } catch (Exception $e) {
@@ -234,20 +258,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 try {
     // First ensure payment_history table exists
     $pdo->exec("
-        CREATE TABLE IF NOT EXISTS payment_history (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id INT NOT NULL,
-            status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO') NOT NULL DEFAULT 'PENDIENTE',
-            amount DECIMAL(10,2) DEFAULT 0.00,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY unique_user (user_id),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            INDEX idx_user_id (user_id),
-            INDEX idx_status (status)
-        )
-    ");
+            CREATE TABLE IF NOT EXISTS payment_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                status ENUM('PAGADO', 'PENDIENTE', 'CANCELADO') NOT NULL DEFAULT 'PENDIENTE',
+                amount DECIMAL(10,2) DEFAULT 0.00,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                INDEX idx_user_id (user_id),
+                INDEX idx_status (status)
+            )
+        ");
 
     // Pending users: Get only users who completed max time (in payment_history with PENDIENTE status)
     // Obtener solo el registro PENDIENTE más reciente por usuario con cálculo de créditos
@@ -278,7 +301,7 @@ try {
     ");
     $users = $stmt_pending->fetchAll();
 
-    // Calcular créditos para cada usuario PENDIENTE
+    // Calcular créditos para cada usuario PENDIENTE y actualizar la tabla payment_history
     foreach ($users as &$user) {
         // Obtener el total de tiempo de todas las sesiones completadas del usuario
         $stmt_time = $pdo->prepare("
@@ -302,7 +325,16 @@ try {
 
         // Solo dar créditos por intervalos completados
         $completed_intervals = floor($total_minutes / $interval_minutes);
-        $user['credits_earned'] = $completed_intervals * $credits_per_interval;
+        $credits_earned = round($completed_intervals * $credits_per_interval);
+        $user['credits_earned'] = $credits_earned;
+
+        // Actualizar el amount en payment_history para preservar el valor exacto
+        $stmt_update_amount = $pdo->prepare("
+            UPDATE payment_history 
+            SET amount = ? 
+            WHERE user_id = ? AND status = 'PENDIENTE'
+        ");
+        $stmt_update_amount->execute([$credits_earned, $user['id']]);
     }
 
 
@@ -696,7 +728,7 @@ function getSiteTitle() {
             background: linear-gradient(45deg, rgba(156, 39, 176, 0.8), rgba(103, 58, 183, 0.8));
         }
 
-        .history-table-container::-webkit-scrollbar-thumb:active {
+        .history-table-container::-webkit-scrollbar-thumb:active{
             background: linear-gradient(45deg, rgba(156, 39, 176, 1), rgba(120, 30, 140, 1));
         }
 
@@ -1446,7 +1478,11 @@ function getSiteTitle() {
                     </div>
                 </td>
                 <td>${user.rank_name || user.role}</td>
-                <td>${user.amount || '0'}</td>
+                <td>
+                            <span class="credits-display">
+                                ${Math.round(user.amount) || 0}
+                            </span>
+                        </td>
                 <td>
                     <span class="status-badge status-${status.toLowerCase()}">
                         ${status}
@@ -1517,8 +1553,7 @@ function getSiteTitle() {
                     // Find the user row in the main table
                     const row = document.querySelector(`tr[data-user-id="${userId}"]`);
 
-                    if (row && status === 'PAGADO') {
-                        // Get username for notification
+                    if (row && status === 'PAGADO') {                        // Get username for notification
                         const usernameElement = row.querySelector('.user-details h4');
                         const username = usernameElement ? usernameElement.textContent : 'Usuario';
 
